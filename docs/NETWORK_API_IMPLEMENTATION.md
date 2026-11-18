@@ -13,11 +13,13 @@ This file records repository-specific integration constraints discovered while p
 
 ## Platform and build constraints
 
-- The existing CI builds Windows, Linux, and macOS.
+- The repository's CI workflow builds Windows, Linux, SteamOS, macOS ARM and macOS Intel. Its pull-request trigger targets `dev`, not `main`; a feature branch alone does not trigger that PR build.
+- Linux/SteamOS CI installs and links libcurl. macOS builds use the system/Homebrew curl libraries through the existing linker configuration.
+- Windows CI uses MSYS2 MinGW (both 32-bit and 64-bit toolchains). WinHTTP is a Windows system library, but it must be explicitly linked with `-lwinhttp` if used.
 - Windows currently links WinINet and Winsock; WinHTTP is not currently linked.
-- Linux/macOS currently link libcurl.
-- The first supported native transport is Windows. Non-Windows builds must still compile cleanly, with explicit unsupported-platform results until a transport is implemented there.
-- The source tree is discovered automatically from `SRC_DIRS`, so a new C source in `src/pc/lua` is included without a separate source-list edit.
+- New C sources in `src/pc/lua` are discovered automatically through `SRC_DIRS`.
+- Keep the Lua-facing API and lifecycle code platform-neutral. Isolate transport backends behind a small interface. Do not add a Windows-only include or linker dependency to common Lua code.
+- Transport support must be reported honestly per platform. A compile-only stub is not a functioning HTTPS/WebSocket implementation.
 
 ## Required implementation invariants
 
@@ -29,18 +31,20 @@ This file records repository-specific integration constraints discovered while p
 6. Only `https://` and `wss://` are accepted. Redirects must not downgrade to plaintext.
 7. The API must not expose a file-writing/download primitive; payloads are delivered in memory.
 8. WebSocket send/receive must distinguish text and binary payloads.
+9. A worker may own copied request data and a stable owner ID only; it must not retain pointers into Lua, mod objects, or mod-owned file buffers.
 
 ## Permissions gap
 
-The current mod model has no general network-permission field or per-mod permission UI. A secure default-deny permission flow must be designed and integrated before network access can be described as permission-protected. Merely checking that a mod called a Lua function is not user consent.
+The current mod model has no general network-permission field or per-mod permission UI. A secure default-deny permission flow must be designed and integrated before network access can be described as permission-protected. Merely checking that a mod called a Lua function is not user consent. Do not silently enable unrestricted access as a shortcut.
 
 ## Verification checklist
 
 - Windows 32-bit and 64-bit compile/link.
-- Linux and macOS compile with unsupported transport stubs.
+- Linux, SteamOS and both macOS CI targets compile with their selected transport backend or an explicit unsupported result.
 - HTTPS success, HTTP error status, invalid URL, TLS failure, timeout, oversized response, and cancellation.
 - WebSocket connect, text/binary send and receive, remote close, local close, reconnect/error paths, oversized frame, and cancellation.
 - Mod disable/reload while requests are active.
 - Lua shutdown while requests are active.
 - Verify callbacks run on the game thread and no callback runs after owner unload.
 - Verify no worker can access Lua after teardown.
+- Verify denied permissions cannot start a DNS lookup or network request.
