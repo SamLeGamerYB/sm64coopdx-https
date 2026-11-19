@@ -532,8 +532,14 @@ static void* network_api_ws_send_worker(void* argument) {
         }
         bool closeRequested = ws->closeRequested;
         bool remoteCloseReceived = ws->remoteCloseReceived;
+        bool discardPending = ws->callbacksSuppressed;
         pthread_mutex_unlock(&sNetworkApiMutex);
 
+        if (message != NULL && discardPending) {
+            free(message->payload);
+            free(message);
+            continue;
+        }
         if (message != NULL) {
             WINHTTP_WEB_SOCKET_BUFFER_TYPE type = message->binary
                 ? WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE
