@@ -296,7 +296,6 @@ static void* network_api_http_worker(void* argument) {
     }
 
     connection = WinHttpConnect(session, host, components.nPort, 0);
-    if (network_api_ws_is_closing(ws)) { goto cleanup; }
     if (connection == NULL) {
         network_api_set_error(request, "HTTPS connection failed");
         goto cleanup;
@@ -726,6 +725,7 @@ static void* network_api_ws_worker(void* argument) {
         goto cleanup;
     }
     connection = WinHttpConnect(session, host, components.nPort, 0);
+    if (network_api_ws_is_closing(ws)) { goto cleanup; }
     if (connection == NULL) {
         network_api_ws_set_error(ws, "WebSocket connection failed");
         goto cleanup;
