@@ -1407,6 +1407,31 @@ void smlua_network_api_shutdown(lua_State* L) {
         network_api_free_request(requests);
         requests = next;
     }
+
+    pthread_mutex_lock(&sNetworkApiMutex);
+    struct NetworkWebSocket* sockets = sNetworkWebSockets;
+    sNetworkWebSockets = NULL;
+    for (struct NetworkWebSocket* ws = sockets; ws != NULL; ws = ws->next) {
+        ws->callbacksSuppressed = true;
+        ws->closeRequested = true;
+        pthread_cond_broadcast(&ws->condition);
+    }
+    pthread_mutex_unlock(&sNetworkApiMutex);
+
+    while (sockets != NULL) {
+        struct NetworkWebSocket* next = sockets->next;
+        if (sockets->threadStarted) { pthread_join(sockets->thread, NULL); }
+        if (L != NULL) {
+            for (int i = 0; i < 4; i++) {
+                if (sockets->callbackRefs[i] != LUA_NOREF) {
+                    luaL_unref(L, LUA_REGISTRYINDEX, sockets->callbackRefs[i]);
+                }
+            }
+        }
+        network_api_ws_free(sockets);
+        sockets = next;
+    }
+    sNetworkApiWebSocketCount = 0;
 #else
     UNUSED L;
 #endif
