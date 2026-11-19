@@ -105,7 +105,7 @@ end
 - `on_error(id, message)` reports transport errors.
 - `on_close(id)` runs when an established connection ends.
 - The optional third argument is a headers table for explicit handshake headers (for example, `Authorization`). Header names and values are validated and the total is limited to 16 KiB.
-- WinHTTP uses a 15-second WebSocket keep-alive interval, a 60-second receive timeout, and a 5-second close-handshake timeout.
+- WinHTTP is configured with a 15-second WebSocket keep-alive interval, a 60-second receive timeout, and a 5-second close-handshake timeout. Actual idle and shutdown timing still needs runtime verification.
 - `websocket_send` and `websocket_close` return booleans. A send returning true means it was queued, not necessarily delivered.
 - A mod may only send to or close socket IDs it created itself.
 
@@ -128,7 +128,7 @@ end
 - Each request stores a copied mod `relativePath`, not a `struct Mod*`.
 - Callback dispatch re-checks that the owner mod is still active and still has permission.
 - When a mod's network permission is revoked or one of its Lua files is hot-reloaded, its pending HTTP requests are marked cancelled, WebSockets are asked to close, and callbacks are discarded.
-- Lua shutdown marks requests cancelled, asks WebSockets to close, joins workers, and releases callback references before `lua_close()`. A worker already inside a synchronous WinHTTP call must wait for that call to return or time out.
+- Lua shutdown marks requests cancelled, asks WebSockets to close, joins workers, and releases callback references before `lua_close()`. A worker already inside a synchronous WinHTTP call must wait for that call to return; exact WebSocket shutdown timing still needs runtime verification.
 - The HTTPS worker uses bounded WinHTTP timeouts and a response-size limit. Cancellation does not close an HTTP handle from another thread; the worker checks the cancellation flag between WinHTTP operations. WebSocket receive/send work is handled by dedicated native threads and bounded queues.
 
 ## Remaining work
