@@ -448,8 +448,6 @@ static void network_api_ws_queue_event(struct NetworkWebSocket* ws,
     event->type = type;
     event->binary = binary;
     pthread_mutex_lock(&sNetworkApiMutex);
-    if (ws->eventTail == NULL) { ws->eventHead = event; }
-    else { ws->eventTail->next = event; }
     if (ws->eventCount >= 32 || payloadLength > NETWORK_WS_MAX_MESSAGE - ws->eventBytes) {
         ws->closeRequested = true;
         pthread_cond_broadcast(&ws->condition);
@@ -458,6 +456,8 @@ static void network_api_ws_queue_event(struct NetworkWebSocket* ws,
         free(event);
         return;
     }
+    if (ws->eventTail == NULL) { ws->eventHead = event; }
+    else { ws->eventTail->next = event; }
     ws->eventTail = event;
     ws->eventCount++;
     ws->eventBytes += payloadLength;
