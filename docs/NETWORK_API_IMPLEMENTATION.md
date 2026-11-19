@@ -29,10 +29,10 @@ This file records repository-specific integration constraints and the current im
 - At most 8 completed HTTPS callbacks are dispatched per game update, matching the maximum number of concurrent requests.
 - Workers never call Lua. Completed requests are checked and dispatched from `smlua_update()` through `smlua_call_hook()`.
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
-- When a mod file is hot-reloaded, pending callbacks owned by that mod are marked stale and discarded on completion. The current WinHTTP request itself is not interrupted.
+- When a mod file is hot-reloaded, its active WinHTTP request handles are closed and pending callbacks are discarded.
 - HTTPS is restricted to `https://`; WinHTTP redirects are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
 - The transport is linked with WinHTTP on Windows. Other platforms currently return an explicit unsupported error.
-- WebSockets, explicit request cancellation handles, and non-Windows transport backends are not implemented yet.
+- WebSockets and non-Windows transport backends are not implemented yet.
 - No build or runtime tests have been executed in this environment. Do not describe this implementation as verified until CI/build tests pass.
 
 ## Required implementation invariants
@@ -40,7 +40,7 @@ This file records repository-specific integration constraints and the current im
 1. No network worker may call Lua or access the Lua registry.
 2. Completion callbacks are dispatched only on the game thread.
 3. Every operation is associated with a stable mod identity and is discarded if that mod is no longer active.
-4. Shutdown must prevent new work, wait for active workers using bounded transport timeouts, clear pending completions and release callback references before Lua is closed. Add prompt cancellation when transport handles are exposed.
+4. Shutdown must prevent new work, close active WinHTTP request handles, join workers, clear pending completions and release callback references before Lua is closed.
 5. All queues, request bodies, response bodies, headers, and WebSocket messages need explicit size limits.
 6. Only `https://` and `wss://` are accepted. Redirects must not downgrade to plaintext.
 7. The API must not expose a file-writing/download primitive; payloads are delivered in memory.
