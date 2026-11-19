@@ -250,11 +250,13 @@ static void* network_api_http_worker(void* argument) {
     requestHandleRegistered = true;
     pthread_mutex_unlock(&sNetworkApiMutex);
 
-    // Disable redirects entirely so a secure request can never be redirected to plaintext HTTP.
-    DWORD disableRedirects = WINHTTP_DISABLE_REDIRECTS;
+    // Prevent downgrade redirects and avoid implicit cookies or ambient authentication.
+    DWORD disabledFeatures = WINHTTP_DISABLE_REDIRECTS |
+                             WINHTTP_DISABLE_COOKIES |
+                             WINHTTP_DISABLE_AUTHENTICATION;
     if (!WinHttpSetOption(httpRequest, WINHTTP_OPTION_DISABLE_FEATURE,
-                          &disableRedirects, sizeof(disableRedirects))) {
-        network_api_set_error(request, "Could not enforce HTTPS-only redirects");
+                          &disabledFeatures, sizeof(disabledFeatures))) {
+        network_api_set_error(request, "Could not enforce secure request policy");
         goto cleanup;
     }
 
