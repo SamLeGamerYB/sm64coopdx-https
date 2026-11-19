@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include "mods.h"
+#include "pc/lua/smlua_network_api.h"
 #include "mods_utils.h"
 #include "mod_cache.h"
 #include "data/dynos.c.h"
@@ -181,6 +182,13 @@ bool mods_generate_remote_base_path(void) {
 }
 
 void mods_activate(struct Mods* mods) {
+    // Stop network work owned by the previous active-mod set before freeing it.
+    for (u16 i = 0; i < gActiveMods.entryCount; i++) {
+        struct Mod* mod = gActiveMods.entries[i];
+        if (mod != NULL) {
+            smlua_network_api_discard_mod_requests(mod->relativePath);
+        }
+    }
     mods_clear(&gActiveMods);
 
     // count enabled
