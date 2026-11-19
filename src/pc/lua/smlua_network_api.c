@@ -697,10 +697,23 @@ void smlua_network_api_update(lua_State* L) {
 
 void smlua_network_api_shutdown(lua_State* L) {
 #ifdef _WIN32
+    HINTERNET handles[NETWORK_API_MAX_REQUESTS] = { 0 };
+    unsigned int handleCount = 0;
     pthread_mutex_lock(&sNetworkApiMutex);
     struct NetworkHttpRequest* requests = sNetworkApiRequests;
     sNetworkApiRequests = NULL;
+    for (struct NetworkHttpRequest* request = requests; request != NULL; request = request->next) {
+        request->cancelled = true;
+        if (request->httpRequest != NULL && handleCount < NETWORK_API_MAX_REQUESTS) {
+            handles[handleCount++] = request->httpRequest;
+            request->httpRequest = NULL;
+        }
+    }
     pthread_mutex_unlock(&sNetworkApiMutex);
+
+    for (unsigned int i = 0; i < handleCount; i++) {
+        WinHttpCloseHandle(handles[i]);
+    }
 
     while (requests != NULL) {
         struct NetworkHttpRequest* next = requests->next;
