@@ -94,6 +94,7 @@ struct NetworkWebSocket {
     bool connected;
     bool closeRequested;
     bool remoteCloseReceived;
+    bool transportFailed;
     bool callbacksSuppressed;
     unsigned int id;
     int callbackRefs[4];
@@ -480,6 +481,7 @@ static void network_api_ws_queue_event(struct NetworkWebSocket* ws,
     pthread_mutex_lock(&sNetworkApiMutex);
     if (ws->eventCount >= 32 || payloadLength > NETWORK_WS_MAX_MESSAGE - ws->eventBytes) {
         ws->closeRequested = true;
+        ws->transportFailed = true;
         pthread_cond_broadcast(&ws->condition);
         pthread_mutex_unlock(&sNetworkApiMutex);
         free(event->payload);
@@ -532,7 +534,7 @@ static void* network_api_ws_send_worker(void* argument) {
         }
         bool closeRequested = ws->closeRequested;
         bool remoteCloseReceived = ws->remoteCloseReceived;
-        bool discardPending = ws->callbacksSuppressed;
+        bool discardPending = ws->callbacksSuppressed || ws->transportFailed || ws->remoteCloseReceived;
         pthread_mutex_unlock(&sNetworkApiMutex);
 
         if (message != NULL && discardPending) {
@@ -553,6 +555,7 @@ static void* network_api_ws_send_worker(void* argument) {
                 network_api_ws_set_error(ws, "WebSocket send failed");
                 pthread_mutex_lock(&sNetworkApiMutex);
                 ws->closeRequested = true;
+                ws->transportFailed = true;
                 pthread_cond_broadcast(&ws->condition);
                 pthread_mutex_unlock(&sNetworkApiMutex);
             }
@@ -586,6 +589,7 @@ static void* network_api_ws_receive_worker(void* argument) {
             pthread_mutex_lock(&sNetworkApiMutex);
             bool expectedClose = ws->closeRequested;
             ws->closeRequested = true;
+            if (!expectedClose) { ws->transportFailed = true; }
             pthread_cond_broadcast(&ws->condition);
             pthread_mutex_unlock(&sNetworkApiMutex);
             if (!expectedClose) { network_api_ws_set_error(ws, "WebSocket receive failed"); }
@@ -611,6 +615,7 @@ static void* network_api_ws_receive_worker(void* argument) {
             network_api_ws_set_error(ws, "WebSocket message exceeds the 1 MiB limit");
             pthread_mutex_lock(&sNetworkApiMutex);
             ws->closeRequested = true;
+            ws->transportFailed = true;
             pthread_cond_broadcast(&ws->condition);
             pthread_mutex_unlock(&sNetworkApiMutex);
             break;
@@ -624,6 +629,7 @@ static void* network_api_ws_receive_worker(void* argument) {
                 network_api_ws_set_error(ws, "Out of memory receiving WebSocket message");
                 pthread_mutex_lock(&sNetworkApiMutex);
                 ws->closeRequested = true;
+                ws->transportFailed = true;
                 pthread_cond_broadcast(&ws->condition);
                 pthread_mutex_unlock(&sNetworkApiMutex);
                 break;
