@@ -328,6 +328,17 @@ void mods_refresh_local(void) {
         hasUserPath = fs_sys_mkdir(userModPath);
     }
 
+    // The active list may still reference local mod objects. Cancel their
+    // network work before the local refresh frees those objects.
+    if (gGameInited) {
+        for (u16 i = 0; i < gActiveMods.entryCount; i++) {
+            struct Mod* mod = gActiveMods.entries[i];
+            if (mod != NULL) {
+                smlua_network_api_discard_mod_requests(mod->relativePath);
+            }
+        }
+    }
+
     // clear mods
     mods_clear(&gLocalMods);
 
