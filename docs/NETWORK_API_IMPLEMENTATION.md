@@ -48,3 +48,12 @@ The current mod model has no general network-permission field or per-mod permiss
 - Verify callbacks run on the game thread and no callback runs after owner unload.
 - Verify no worker can access Lua after teardown.
 - Verify denied permissions cannot start a DNS lookup or network request.
+
+## Source audit: mod metadata and UI
+
+- Mod metadata is parsed from leading Lua comment lines in `mod_extract_fields()` in `src/pc/mods/mod.c`. The parser stops at the first non-comment line.
+- Existing metadata includes `name`, `incompatible`, `category`, `description`, `pausable`, and `ignore-script-warnings`. There is no network capability field today.
+- `struct Mod` in `src/pc/mods/mod.h` has no network permission state.
+- The current per-mod menu in `djui_panel_mod_menu.c` is generated from Lua-registered mod menu elements; it is not a built-in permissions manager. The mod list panel only displays active mod names.
+- Therefore, a metadata declaration such as `-- network-access: true` could describe a requested capability, but cannot itself grant permission. The user-facing grant must be stored separately from mod-authored metadata and checked before any transport work is queued.
+- The Lua runtime lifecycle is suitable for a shared network service, but owner tracking must use a copied `relativePath` string and callback references must remain owned by the current Lua state.
