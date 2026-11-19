@@ -47,7 +47,7 @@ else
 end
 ```
 
-The function validates the active mod's permission before creating a worker or performing network activity. It returns a numeric request ID immediately; the completion callback runs later on the game thread. The creating mod can cancel its own pending request with `network.cancel_request(requestId)`, which returns a boolean.
+The function validates the active mod's permission before creating a worker or performing network activity. It returns a numeric request ID immediately; the completion callback runs later on the game thread. The creating mod can request cancellation of its own pending request with `network.cancel_request(requestId)`, which returns a boolean. The callback is suppressed; the worker stops at the next safe point after its current synchronous WinHTTP call returns, so cancellation may take up to the current operation's timeout.
 
 ### HTTPS limits
 
@@ -87,9 +87,9 @@ These functions are design examples only and are not available in the current bu
 - Completion callbacks are dispatched from `smlua_update()` on the game thread.
 - Each request stores a copied mod `relativePath`, not a `struct Mod*`.
 - Callback dispatch re-checks that the owner mod is still active and still has permission.
-- When a mod's network permission is revoked or one of its Lua files is hot-reloaded, its pending HTTP requests are cancelled and callbacks are discarded.
-- Lua shutdown closes active WinHTTP request handles, joins workers, and releases callback references before `lua_close()`.
-- The current Windows worker uses bounded WinHTTP timeouts and a response-size limit. Shutdown closes active request handles; a worker still resolving a connection may take up to the connect timeout to exit.
+- When a mod's network permission is revoked or one of its Lua files is hot-reloaded, its pending HTTP requests are marked cancelled and callbacks are discarded.
+- Lua shutdown marks all requests cancelled, joins workers, and releases callback references before `lua_close()`. A worker already inside a synchronous WinHTTP call must wait for that call to return or time out.
+- The current Windows worker uses bounded WinHTTP timeouts and a response-size limit. Cancellation does not close a handle from another thread; the worker checks the cancellation flag between WinHTTP operations.
 
 ## Remaining work
 
