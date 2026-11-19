@@ -28,9 +28,6 @@ struct NetworkHttpRequest {
     bool threadStarted;
     bool complete;
     bool cancelled;
-#ifdef _WIN32
-    HINTERNET httpRequest;
-#endif
     unsigned int id;
     int callbackRef;
     char ownerPath[SYS_MAX_PATH];
@@ -159,8 +156,6 @@ static void* network_api_http_worker(void* argument) {
     wchar_t* wideHeaders = NULL;
     wchar_t* host = NULL;
     wchar_t* path = NULL;
-    bool requestHandleRegistered = false;
-
     if (network_api_request_is_cancelled(request)) {
         network_api_set_error(request, "HTTPS request was cancelled");
         goto cleanup;
@@ -244,15 +239,10 @@ static void* network_api_http_worker(void* argument) {
         goto cleanup;
     }
 
-    pthread_mutex_lock(&sNetworkApiMutex);
-    if (request->cancelled) {
-        pthread_mutex_unlock(&sNetworkApiMutex);
+    if (network_api_request_is_cancelled(request)) {
         network_api_set_error(request, "HTTPS request was cancelled");
         goto cleanup;
     }
-    request->httpRequest = httpRequest;
-    requestHandleRegistered = true;
-    pthread_mutex_unlock(&sNetworkApiMutex);
 
     // Prevent downgrade redirects and avoid implicit cookies or ambient authentication.
     DWORD disabledFeatures = WINHTTP_DISABLE_REDIRECTS |
@@ -341,18 +331,7 @@ static void* network_api_http_worker(void* argument) {
     }
 
 cleanup:
-    if (httpRequest != NULL) {
-        bool closeRequestHandle = !requestHandleRegistered;
-        if (requestHandleRegistered) {
-            pthread_mutex_lock(&sNetworkApiMutex);
-            if (request->httpRequest == httpRequest) {
-                request->httpRequest = NULL;
-                closeRequestHandle = true;
-            }
-            pthread_mutex_unlock(&sNetworkApiMutex);
-        }
-        if (closeRequestHandle) { WinHttpCloseHandle(httpRequest); }
-    }
+    if (httpRequest != NULL) { WinHttpCloseHandle(httpRequest); }
     if (connection != NULL) { WinHttpCloseHandle(connection); }
     if (session != NULL) { WinHttpCloseHandle(session); }
     free(wideUrl);
@@ -397,20 +376,16 @@ static int network_api_cancel_request(lua_State* L) {
     }
 
 #ifdef _WIN32
-    HINTERNET handleToClose = NULL;
     bool found = false;
     pthread_mutex_lock(&sNetworkApiMutex);
     for (struct NetworkHttpRequest* request = sNetworkApiRequests; request != NULL; request = request->next) {
         if (request->id == (unsigned int)requestId && strcmp(request->ownerPath, owner->relativePath) == 0) {
             request->cancelled = true;
-            handleToClose = request->httpRequest;
-            request->httpRequest = NULL;
             found = true;
             break;
         }
     }
     pthread_mutex_unlock(&sNetworkApiMutex);
-    if (handleToClose != NULL) { WinHttpCloseHandle(handleToClose); }
     lua_pushboolean(L, found);
 #else
     lua_pushboolean(L, false);
@@ -650,22 +625,13 @@ void smlua_network_api_bind(lua_State* L) {
 void smlua_network_api_discard_mod_requests(const char* relativePath) {
 #ifdef _WIN32
     if (relativePath == NULL) { return; }
-    HINTERNET handles[NETWORK_API_MAX_REQUESTS] = { 0 };
-    unsigned int handleCount = 0;
     pthread_mutex_lock(&sNetworkApiMutex);
     for (struct NetworkHttpRequest* request = sNetworkApiRequests; request != NULL; request = request->next) {
         if (strcmp(request->ownerPath, relativePath) == 0) {
             request->cancelled = true;
-            if (request->httpRequest != NULL && handleCount < NETWORK_API_MAX_REQUESTS) {
-                handles[handleCount++] = request->httpRequest;
-                request->httpRequest = NULL;
-            }
         }
     }
     pthread_mutex_unlock(&sNetworkApiMutex);
-    for (unsigned int i = 0; i < handleCount; i++) {
-        WinHttpCloseHandle(handles[i]);
-    }
 #else
     UNUSED relativePath;
 #endif
@@ -725,23 +691,13 @@ void smlua_network_api_update(lua_State* L) {
 
 void smlua_network_api_shutdown(lua_State* L) {
 #ifdef _WIN32
-    HINTERNET handles[NETWORK_API_MAX_REQUESTS] = { 0 };
-    unsigned int handleCount = 0;
     pthread_mutex_lock(&sNetworkApiMutex);
     struct NetworkHttpRequest* requests = sNetworkApiRequests;
     sNetworkApiRequests = NULL;
     for (struct NetworkHttpRequest* request = requests; request != NULL; request = request->next) {
         request->cancelled = true;
-        if (request->httpRequest != NULL && handleCount < NETWORK_API_MAX_REQUESTS) {
-            handles[handleCount++] = request->httpRequest;
-            request->httpRequest = NULL;
-        }
     }
     pthread_mutex_unlock(&sNetworkApiMutex);
-
-    for (unsigned int i = 0; i < handleCount; i++) {
-        WinHttpCloseHandle(handles[i]);
-    }
 
     while (requests != NULL) {
         struct NetworkHttpRequest* next = requests->next;
