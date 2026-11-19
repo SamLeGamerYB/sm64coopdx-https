@@ -93,6 +93,7 @@ struct NetworkWebSocket {
     bool complete;
     bool connected;
     bool closeRequested;
+    bool remoteCloseReceived;
     bool callbacksSuppressed;
     unsigned int id;
     int callbackRefs[4];
@@ -511,6 +512,7 @@ static void* network_api_ws_send_worker(void* argument) {
             if (ws->sendBytes >= message->payloadLength) { ws->sendBytes -= message->payloadLength; }
         }
         bool closeRequested = ws->closeRequested;
+        bool remoteCloseReceived = ws->remoteCloseReceived;
         pthread_mutex_unlock(&sNetworkApiMutex);
 
         if (message != NULL) {
@@ -532,10 +534,12 @@ static void* network_api_ws_send_worker(void* argument) {
             continue;
         }
         if (closeRequested) {
-            // Shutdown closes only the send side; the receive worker can finish
-            // the peer's close handshake without concurrent full-close calls.
-            WinHttpWebSocketShutdown(ws->socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS,
-                                     NULL, 0);
+            // A peer-initiated close is answered by the connection owner after
+            // both workers have stopped. Local close only shuts down the send side.
+            if (!remoteCloseReceived) {
+                WinHttpWebSocketShutdown(ws->socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS,
+                                         NULL, 0);
+            }
             break;
         }
     }
@@ -564,6 +568,7 @@ static void* network_api_ws_receive_worker(void* argument) {
         }
         if (bufferType == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) {
             pthread_mutex_lock(&sNetworkApiMutex);
+            ws->remoteCloseReceived = true;
             ws->closeRequested = true;
             pthread_cond_broadcast(&ws->condition);
             pthread_mutex_unlock(&sNetworkApiMutex);
@@ -759,8 +764,19 @@ static void* network_api_ws_worker(void* argument) {
     }
     if (ws->sendThreadStarted) { pthread_join(ws->sendThread, NULL); }
     if (ws->receiveThreadStarted) { pthread_join(ws->receiveThread, NULL); }
-    // Both send and receive workers have stopped, so it is now safe to fully close.
-    WinHttpWebSocketClose(socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, NULL, 0);
+    // Both send and receive workers have stopped, so it is now safe to finish
+    // the close handshake and release the WebSocket handle.
+    USHORT peerCloseStatus = WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS;
+    BYTE peerCloseReason[123];
+    DWORD peerCloseReasonLength = 0;
+    if (WinHttpWebSocketQueryCloseStatus(socket, &peerCloseStatus,
+                                         peerCloseReason, sizeof(peerCloseReason),
+                                         &peerCloseReasonLength) == NO_ERROR) {
+        WinHttpWebSocketClose(socket, peerCloseStatus,
+                              peerCloseReason, peerCloseReasonLength);
+    } else {
+        WinHttpWebSocketClose(socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, NULL, 0);
+    }
     network_api_ws_free_messages(ws);
     network_api_ws_queue_event(ws, NETWORK_WS_EVENT_CLOSE, NULL, 0, false);
 
