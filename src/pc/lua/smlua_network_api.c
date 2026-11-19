@@ -5,6 +5,7 @@
 
 #include <pthread.h>
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -355,14 +356,14 @@ static int network_api_is_supported(lua_State* L) {
 }
 
 static int network_api_cancel_request(lua_State* L) {
-    if (lua_gettop(L) != 1 || lua_type(L, 1) != LUA_TNUMBER) {
+    if (lua_gettop(L) != 1 || lua_type(L, 1) != LUA_TNUMBER || !lua_isinteger(L, 1)) {
         lua_pushboolean(L, false);
         return 1;
     }
 
     lua_Integer requestId = lua_tointeger(L, 1);
     struct Mod* owner = gLuaActiveMod;
-    if (requestId <= 0 || owner == NULL) {
+    if (requestId <= 0 || requestId > UINT_MAX || owner == NULL) {
         lua_pushboolean(L, false);
         return 1;
     }
@@ -621,13 +622,22 @@ void smlua_network_api_bind(lua_State* L) {
 void smlua_network_api_discard_mod_requests(const char* relativePath) {
 #ifdef _WIN32
     if (relativePath == NULL) { return; }
+    HINTERNET handles[NETWORK_API_MAX_REQUESTS] = { 0 };
+    unsigned int handleCount = 0;
     pthread_mutex_lock(&sNetworkApiMutex);
     for (struct NetworkHttpRequest* request = sNetworkApiRequests; request != NULL; request = request->next) {
         if (strcmp(request->ownerPath, relativePath) == 0) {
             request->cancelled = true;
+            if (request->httpRequest != NULL && handleCount < NETWORK_API_MAX_REQUESTS) {
+                handles[handleCount++] = request->httpRequest;
+                request->httpRequest = NULL;
+            }
         }
     }
     pthread_mutex_unlock(&sNetworkApiMutex);
+    for (unsigned int i = 0; i < handleCount; i++) {
+        WinHttpCloseHandle(handles[i]);
+    }
 #else
     UNUSED relativePath;
 #endif
