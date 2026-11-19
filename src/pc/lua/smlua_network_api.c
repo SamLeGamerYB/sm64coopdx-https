@@ -1,3 +1,18 @@
+#ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#elif _WIN32_WINNT < 0x0602
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#endif
+#ifndef WINVER
+#define WINVER 0x0602
+#elif WINVER < 0x0602
+#undef WINVER
+#define WINVER 0x0602
+#endif
+#endif
+
 #include "smlua_network_api.h"
 
 #include "smlua.h"
@@ -12,12 +27,6 @@
 #include <wchar.h>
 
 #ifdef _WIN32
-#ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0602
-#elif _WIN32_WINNT < 0x0602
-#undef _WIN32_WINNT
-#define _WIN32_WINNT 0x0602
-#endif
 #include <windows.h>
 #include <winhttp.h>
 #endif
