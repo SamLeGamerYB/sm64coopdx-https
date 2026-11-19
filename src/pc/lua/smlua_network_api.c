@@ -573,7 +573,8 @@ void smlua_network_api_discard_mod_requests(const char* relativePath) {
 
 void smlua_network_api_update(lua_State* L) {
 #ifdef _WIN32
-    for (;;) {
+    unsigned int processed = 0;
+    while (processed < NETWORK_API_MAX_REQUESTS) {
         struct NetworkHttpRequest* completed = NULL;
         pthread_mutex_lock(&sNetworkApiMutex);
         struct NetworkHttpRequest** link = &sNetworkApiRequests;
@@ -587,6 +588,7 @@ void smlua_network_api_update(lua_State* L) {
         }
         pthread_mutex_unlock(&sNetworkApiMutex);
         if (completed == NULL) { break; }
+        processed++;
 
         if (completed->threadStarted) { pthread_join(completed->thread, NULL); }
         if (sNetworkApiRequestCount > 0) { sNetworkApiRequestCount--; }
