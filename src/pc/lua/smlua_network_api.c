@@ -436,6 +436,48 @@ cleanup:
 
 
 #ifdef _WIN32
+typedef HINTERNET (WINAPI *NetworkApiWebSocketCompleteUpgradeFn)(HINTERNET, DWORD_PTR);
+typedef DWORD (WINAPI *NetworkApiWebSocketSendFn)(HINTERNET, WINHTTP_WEB_SOCKET_BUFFER_TYPE, PVOID, DWORD);
+typedef DWORD (WINAPI *NetworkApiWebSocketReceiveFn)(HINTERNET, PVOID, DWORD, DWORD*, WINHTTP_WEB_SOCKET_BUFFER_TYPE*);
+typedef DWORD (WINAPI *NetworkApiWebSocketCloseFn)(HINTERNET, USHORT, PVOID, DWORD);
+typedef DWORD (WINAPI *NetworkApiWebSocketShutdownFn)(HINTERNET, USHORT, PVOID, DWORD);
+typedef DWORD (WINAPI *NetworkApiWebSocketQueryCloseStatusFn)(HINTERNET, USHORT*, PVOID, DWORD, DWORD*);
+
+static HMODULE sNetworkApiWinHttpModule = NULL;
+static NetworkApiWebSocketCompleteUpgradeFn sNetworkApiWebSocketCompleteUpgrade = NULL;
+static NetworkApiWebSocketSendFn sNetworkApiWebSocketSend = NULL;
+static NetworkApiWebSocketReceiveFn sNetworkApiWebSocketReceive = NULL;
+static NetworkApiWebSocketCloseFn sNetworkApiWebSocketClose = NULL;
+static NetworkApiWebSocketShutdownFn sNetworkApiWebSocketShutdown = NULL;
+static NetworkApiWebSocketQueryCloseStatusFn sNetworkApiWebSocketQueryCloseStatus = NULL;
+static bool sNetworkApiWebSocketFunctionsLoaded = false;
+static bool sNetworkApiWebSocketFunctionsAvailable = false;
+
+static bool network_api_load_websocket_functions(void) {
+    if (sNetworkApiWebSocketFunctionsLoaded) { return sNetworkApiWebSocketFunctionsAvailable; }
+    sNetworkApiWebSocketFunctionsLoaded = true;
+    sNetworkApiWinHttpModule = GetModuleHandleW(L"winhttp.dll");
+    if (sNetworkApiWinHttpModule == NULL) {
+        sNetworkApiWinHttpModule = LoadLibraryW(L"winhttp.dll");
+    }
+    if (sNetworkApiWinHttpModule == NULL) { return false; }
+
+    sNetworkApiWebSocketCompleteUpgrade = (NetworkApiWebSocketCompleteUpgradeFn)GetProcAddress(sNetworkApiWinHttpModule, "WinHttpWebSocketCompleteUpgrade");
+    sNetworkApiWebSocketSend = (NetworkApiWebSocketSendFn)GetProcAddress(sNetworkApiWinHttpModule, "WinHttpWebSocketSend");
+    sNetworkApiWebSocketReceive = (NetworkApiWebSocketReceiveFn)GetProcAddress(sNetworkApiWinHttpModule, "WinHttpWebSocketReceive");
+    sNetworkApiWebSocketClose = (NetworkApiWebSocketCloseFn)GetProcAddress(sNetworkApiWinHttpModule, "WinHttpWebSocketClose");
+    sNetworkApiWebSocketShutdown = (NetworkApiWebSocketShutdownFn)GetProcAddress(sNetworkApiWinHttpModule, "WinHttpWebSocketShutdown");
+    sNetworkApiWebSocketQueryCloseStatus = (NetworkApiWebSocketQueryCloseStatusFn)GetProcAddress(sNetworkApiWinHttpModule, "WinHttpWebSocketQueryCloseStatus");
+    sNetworkApiWebSocketFunctionsAvailable =
+        sNetworkApiWebSocketCompleteUpgrade != NULL &&
+        sNetworkApiWebSocketSend != NULL &&
+        sNetworkApiWebSocketReceive != NULL &&
+        sNetworkApiWebSocketClose != NULL &&
+        sNetworkApiWebSocketShutdown != NULL &&
+        sNetworkApiWebSocketQueryCloseStatus != NULL;
+    return sNetworkApiWebSocketFunctionsAvailable;
+}
+
 static bool network_api_has_wss_prefix(const char* url) {
     static const char prefix[] = "wss://";
     if (strlen(url) < sizeof(prefix) - 1) { return false; }
@@ -545,7 +587,7 @@ static void* network_api_ws_send_worker(void* argument) {
             WINHTTP_WEB_SOCKET_BUFFER_TYPE type = message->binary
                 ? WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE
                 : WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE;
-            DWORD result = WinHttpWebSocketSend(ws->socket, type,
+            DWORD result = sNetworkApiWebSocketSend(ws->socket, type,
                                                 message->payload,
                                                 (DWORD)message->payloadLength);
             free(message->payload);
@@ -564,7 +606,7 @@ static void* network_api_ws_send_worker(void* argument) {
             // A peer-initiated close is answered by the connection owner after
             // both workers have stopped. Local close only shuts down the send side.
             if (!remoteCloseReceived) {
-                WinHttpWebSocketShutdown(ws->socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS,
+                sNetworkApiWebSocketShutdown(ws->socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS,
                                          NULL, 0);
             }
             break;
@@ -582,7 +624,7 @@ static void* network_api_ws_receive_worker(void* argument) {
     for (;;) {
         DWORD bytesRead = 0;
         WINHTTP_WEB_SOCKET_BUFFER_TYPE bufferType;
-        DWORD result = WinHttpWebSocketReceive(ws->socket, chunk, sizeof(chunk),
+        DWORD result = sNetworkApiWebSocketReceive(ws->socket, chunk, sizeof(chunk),
                                                &bytesRead, &bufferType);
         if (result != NO_ERROR) {
             pthread_mutex_lock(&sNetworkApiMutex);
@@ -758,7 +800,7 @@ static void* network_api_ws_worker(void* argument) {
         network_api_ws_set_error(ws, "WSS handshake failed");
         goto cleanup;
     }
-    socket = WinHttpWebSocketCompleteUpgrade(request, 0);
+    socket = sNetworkApiWebSocketCompleteUpgrade(request, 0);
     if (socket == NULL) {
         network_api_ws_set_error(ws, "Server did not accept the WebSocket upgrade");
         goto cleanup;
@@ -813,13 +855,13 @@ static void* network_api_ws_worker(void* argument) {
     USHORT peerCloseStatus = WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS;
     BYTE peerCloseReason[123];
     DWORD peerCloseReasonLength = 0;
-    if (WinHttpWebSocketQueryCloseStatus(socket, &peerCloseStatus,
+    if (sNetworkApiWebSocketQueryCloseStatus(socket, &peerCloseStatus,
                                          peerCloseReason, sizeof(peerCloseReason),
                                          &peerCloseReasonLength) == NO_ERROR) {
-        WinHttpWebSocketClose(socket, peerCloseStatus,
+        sNetworkApiWebSocketClose(socket, peerCloseStatus,
                               peerCloseReason, peerCloseReasonLength);
     } else {
-        WinHttpWebSocketClose(socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, NULL, 0);
+        sNetworkApiWebSocketClose(socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, NULL, 0);
     }
     network_api_ws_free_messages(ws);
     network_api_ws_queue_event(ws, NETWORK_WS_EVENT_CLOSE, NULL, 0, false);
@@ -893,6 +935,11 @@ static int network_api_websocket_connect(lua_State* L) {
         !network_api_has_wss_prefix(url)) {
         lua_pushnil(L);
         lua_pushstring(L, "Only valid wss:// URLs up to 2048 bytes are accepted");
+        return 2;
+    }
+    if (!network_api_load_websocket_functions()) {
+        lua_pushnil(L);
+        lua_pushstring(L, "WSS requires Windows 8 or newer with WinHTTP WebSocket support");
         return 2;
     }
     if (sNetworkApiWebSocketCount >= NETWORK_WS_MAX_CONNECTIONS) {
