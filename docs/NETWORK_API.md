@@ -89,11 +89,10 @@ These functions are design examples only and are not available in the current bu
 - Callback dispatch re-checks that the owner mod is still active and still has permission.
 - When a mod's network permission is revoked or one of its Lua files is hot-reloaded, its pending HTTP requests are cancelled and callbacks are discarded.
 - Lua shutdown closes active WinHTTP request handles, joins workers, and releases callback references before `lua_close()`.
-- The current Windows worker uses bounded WinHTTP timeouts and a response-size limit. A shutdown may wait for an in-flight request to time out.
+- The current Windows worker uses bounded WinHTTP timeouts and a response-size limit. Shutdown closes active request handles; a worker still resolving a connection may take up to the connect timeout to exit.
 
 ## Remaining work
 
 - Implement secure WebSocket connect/send/receive/close with text and binary frames.
-- Add explicit cancellation and prompt teardown for in-flight HTTPS requests.
 - Implement a non-Windows transport backend or continue returning unsupported.
 - Build and test Windows 32-bit/64-bit and all supported non-Windows CI targets.
