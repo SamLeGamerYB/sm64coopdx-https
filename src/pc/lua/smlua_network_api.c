@@ -522,7 +522,6 @@ static void* network_api_ws_receive_worker(void* argument) {
             break;
         }
         if (bufferType == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) {
-            network_api_ws_queue_event(ws, NETWORK_WS_EVENT_CLOSE, NULL, 0, false);
             pthread_mutex_lock(&sNetworkApiMutex);
             ws->closeRequested = true;
             pthread_cond_broadcast(&ws->condition);
@@ -585,8 +584,13 @@ static void* network_api_ws_worker(void* argument) {
     wchar_t* wideUrl = NULL;
     wchar_t* host = NULL;
     wchar_t* path = NULL;
+    char* httpsUrl = malloc(strlen(ws->url) + 3);
 
-    wideUrl = network_api_utf8_to_wide(ws->url);
+    if (httpsUrl != NULL) {
+        snprintf(httpsUrl, strlen(ws->url) + 3, "https://%s", ws->url + 6);
+        wideUrl = network_api_utf8_to_wide(httpsUrl);
+    }
+    free(httpsUrl);
     if (wideUrl == NULL) {
         network_api_ws_set_error(ws, "Invalid UTF-8 in WebSocket URL");
         goto cleanup;
@@ -683,9 +687,9 @@ static void* network_api_ws_worker(void* argument) {
         pthread_cond_broadcast(&ws->condition);
         pthread_mutex_unlock(&sNetworkApiMutex);
     }
-    if (pthread_create(&ws->receiveThread, NULL, network_api_ws_receive_worker, ws) == 0) {
+    if (ws->sendThreadStarted && pthread_create(&ws->receiveThread, NULL, network_api_ws_receive_worker, ws) == 0) {
         ws->receiveThreadStarted = true;
-    } else {
+    } else if (ws->sendThreadStarted) {
         network_api_ws_set_error(ws, "Could not start WebSocket receiver");
         pthread_mutex_lock(&sNetworkApiMutex);
         ws->closeRequested = true;
