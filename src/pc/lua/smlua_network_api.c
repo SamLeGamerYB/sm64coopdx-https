@@ -142,6 +142,13 @@ static void network_api_set_error(struct NetworkHttpRequest* request, const char
     snprintf(request->error, sizeof(request->error), "%s", message);
 }
 
+static bool network_api_request_is_cancelled(struct NetworkHttpRequest* request) {
+    pthread_mutex_lock(&sNetworkApiMutex);
+    bool cancelled = request->cancelled;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    return cancelled;
+}
+
 static void* network_api_http_worker(void* argument) {
     struct NetworkHttpRequest* request = argument;
     HINTERNET session = NULL;
@@ -153,6 +160,11 @@ static void* network_api_http_worker(void* argument) {
     wchar_t* host = NULL;
     wchar_t* path = NULL;
     bool requestHandleRegistered = false;
+
+    if (network_api_request_is_cancelled(request)) {
+        network_api_set_error(request, "HTTPS request was cancelled");
+        goto cleanup;
+    }
 
     wideUrl = network_api_utf8_to_wide(request->url);
     wideMethod = network_api_utf8_to_wide(request->method);
@@ -204,9 +216,19 @@ static void* network_api_http_worker(void* argument) {
     }
     WinHttpSetTimeouts(session, 5000, 5000, NETWORK_API_TIMEOUT_MS, NETWORK_API_TIMEOUT_MS);
 
+    if (network_api_request_is_cancelled(request)) {
+        network_api_set_error(request, "HTTPS request was cancelled");
+        goto cleanup;
+    }
+
     connection = WinHttpConnect(session, host, components.nPort, 0);
     if (connection == NULL) {
         network_api_set_error(request, "HTTPS connection failed");
+        goto cleanup;
+    }
+
+    if (network_api_request_is_cancelled(request)) {
+        network_api_set_error(request, "HTTPS request was cancelled");
         goto cleanup;
     }
 
