@@ -33,9 +33,13 @@ This file records repository-specific integration constraints discovered while p
 8. WebSocket send/receive must distinguish text and binary payloads.
 9. A worker may own copied request data and a stable owner ID only; it must not retain pointers into Lua, mod objects, or mod-owned file buffers.
 
-## Permissions gap
+## Permission groundwork implemented
 
-The current mod model has no general network-permission field or per-mod permission UI. A secure default-deny permission flow must be designed and integrated before network access can be described as permission-protected. Merely checking that a mod called a Lua function is not user consent. Do not silently enable unrestricted access as a shortcut.
+- `struct Mod` now carries a `networkAccessAllowed` flag. It defaults to false because mod instances are zero-initialized.
+- The host mod list displays an explicit per-mod **Allow network access** checkbox. The user must opt in; mod metadata cannot grant access.
+- The opt-in is saved as `allow-mod-network:` entries in the normal config file and restored by matching the mod's stable `relativePath`.
+- Local mod refresh preserves granted permissions for unchanged mod paths. A newly installed mod or a mod whose path changes remains denied.
+- This is only the permission foundation. The upcoming Lua API must check the active mod's flag before it queues any request, and remote mods remain denied unless a deliberate permission UI is provided for them.
 
 ## Verification checklist
 
@@ -53,7 +57,6 @@ The current mod model has no general network-permission field or per-mod permiss
 
 - Mod metadata is parsed from leading Lua comment lines in `mod_extract_fields()` in `src/pc/mods/mod.c`. The parser stops at the first non-comment line.
 - Existing metadata includes `name`, `incompatible`, `category`, `description`, `pausable`, and `ignore-script-warnings`. There is no network capability field today.
-- `struct Mod` in `src/pc/mods/mod.h` has no network permission state.
-- The current per-mod menu in `djui_panel_mod_menu.c` is generated from Lua-registered mod menu elements; it is not a built-in permissions manager. The mod list panel only displays active mod names.
-- Therefore, a metadata declaration such as `-- network-access: true` could describe a requested capability, but cannot itself grant permission. The user-facing grant must be stored separately from mod-authored metadata and checked before any transport work is queued.
+- The built-in host mod list in `djui_panel_host_mods.c` is the current user-facing permission surface. The Lua-generated per-mod menu remains separate.
+- Mod metadata is not treated as consent; only the user's persisted checkbox selection grants the local mod permission.
 - The Lua runtime lifecycle is suitable for a shared network service, but owner tracking must use a copied `relativePath` string and callback references must remain owned by the current Lua state.
