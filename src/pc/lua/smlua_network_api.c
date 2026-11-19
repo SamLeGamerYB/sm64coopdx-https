@@ -1177,6 +1177,15 @@ static int network_api_is_supported(lua_State* L) {
     return 1;
 }
 
+static int network_api_websocket_is_supported(lua_State* L) {
+#ifdef _WIN32
+    lua_pushboolean(L, network_api_load_websocket_functions());
+#else
+    lua_pushboolean(L, false);
+#endif
+    return 1;
+}
+
 static int network_api_cancel_request(lua_State* L) {
     if (lua_gettop(L) != 1 || lua_type(L, 1) != LUA_TNUMBER || !lua_isinteger(L, 1)) {
         lua_pushboolean(L, false);
@@ -1430,6 +1439,8 @@ void smlua_network_api_bind(lua_State* L) {
     lua_setfield(L, -2, "has_permission");
     lua_pushcfunction(L, network_api_is_supported);
     lua_setfield(L, -2, "is_supported");
+    lua_pushcfunction(L, network_api_websocket_is_supported);
+    lua_setfield(L, -2, "websocket_is_supported");
     lua_pushcfunction(L, network_api_cancel_request);
     lua_setfield(L, -2, "cancel_request");
     lua_pushcfunction(L, network_api_https_request);
