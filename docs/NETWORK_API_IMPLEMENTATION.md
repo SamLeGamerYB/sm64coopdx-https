@@ -21,6 +21,18 @@ This file records repository-specific integration constraints discovered while p
 - Keep the Lua-facing API and lifecycle code platform-neutral. Isolate transport backends behind a small interface. Do not add a Windows-only include or linker dependency to common Lua code.
 - Transport support must be reported honestly per platform. A compile-only stub is not a functioning HTTPS/WebSocket implementation.
 
+## Current native implementation status
+
+- A Windows-only asynchronous HTTPS transport now exists in `src/pc/lua/smlua_network_api.c`, using WinHTTP on worker threads.
+- Lua surface: `network.has_permission()`, `network.is_supported()`, and `network.https_request(options, callback)`.
+- The HTTPS request accepts a caller-selected method, headers, and optional body. The callback receives `statusCode, rawResponseHeaders, responseBody, errorMessage`.
+- Workers never call Lua. Completed requests are checked and dispatched from `smlua_update()` through `smlua_call_hook()`.
+- The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
+- HTTPS is restricted to `https://`; WinHTTP redirects are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
+- The transport is linked with WinHTTP on Windows. Other platforms currently return an explicit unsupported error.
+- WebSockets, cancellation handles, and non-Windows transport backends are not implemented yet.
+- No build or runtime tests have been executed in this environment. Do not describe this implementation as verified until CI/build tests pass.
+
 ## Required implementation invariants
 
 1. No network worker may call Lua or access the Lua registry.
