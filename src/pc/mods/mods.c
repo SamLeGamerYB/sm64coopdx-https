@@ -103,7 +103,12 @@ static void mods_local_store_network_permissions(void) {
         if (mod == NULL || !mod->networkAccessAllowed) { continue; }
 
         struct LocalNetworkPermission* permission = calloc(1, sizeof(struct LocalNetworkPermission));
+        if (permission == NULL) { continue; }
         permission->relativePath = sys_strdup(mod->relativePath);
+        if (permission->relativePath == NULL) {
+            free(permission);
+            continue;
+        }
         if (prev == NULL) {
             sLocalNetworkPermissions = permission;
         } else {
