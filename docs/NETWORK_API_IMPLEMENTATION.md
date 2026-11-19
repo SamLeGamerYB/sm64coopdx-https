@@ -30,7 +30,7 @@ This file records repository-specific integration constraints and the current im
 - Workers never call Lua. Completed requests are checked and dispatched from `smlua_update()` through `smlua_call_hook()`.
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
 - When a mod file is hot-reloaded or the user revokes its network permission, its active WinHTTP request handles are closed and pending callbacks are discarded.
-- HTTPS is restricted to `https://`; WinHTTP redirects are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
+- HTTPS is restricted to `https://`; WinHTTP redirects, automatic cookies, and ambient authentication are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
 - The transport is linked with WinHTTP on Windows. Other platforms currently return an explicit unsupported error.
 - WebSockets and non-Windows transport backends are not implemented yet.
 - No build or runtime tests have been executed in this environment. Do not describe this implementation as verified until CI/build tests pass.
