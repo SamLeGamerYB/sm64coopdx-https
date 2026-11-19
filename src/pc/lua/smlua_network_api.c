@@ -65,6 +65,16 @@ static bool network_api_contains_line_break(const char* value) {
     return strchr(value, '\r') != NULL || strchr(value, '\n') != NULL;
 }
 
+static bool network_api_valid_header_name(const char* name) {
+    if (name[0] == '\0') { return false; }
+    for (const unsigned char* c = (const unsigned char*)name; *c != '\0'; c++) {
+        if (!(isalnum(*c) || strchr("!#$%&'*+-.^_`|~", *c) != NULL)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void network_api_free_request(struct NetworkHttpRequest* request) {
     if (request == NULL) { return; }
     free(request->url);
@@ -194,8 +204,11 @@ static void* network_api_http_worker(void* argument) {
 
     // Disable redirects entirely so a secure request can never be redirected to plaintext HTTP.
     DWORD disableRedirects = WINHTTP_DISABLE_REDIRECTS;
-    WinHttpSetOption(httpRequest, WINHTTP_OPTION_DISABLE_FEATURE,
-                     &disableRedirects, sizeof(disableRedirects));
+    if (!WinHttpSetOption(httpRequest, WINHTTP_OPTION_DISABLE_FEATURE,
+                          &disableRedirects, sizeof(disableRedirects))) {
+        network_api_set_error(request, "Could not enforce HTTPS-only redirects");
+        goto cleanup;
+    }
 
     if (!WinHttpSendRequest(httpRequest,
                             wideHeaders != NULL ? wideHeaders : WINHTTP_NO_ADDITIONAL_HEADERS,
@@ -213,12 +226,15 @@ static void* network_api_http_worker(void* argument) {
     }
 
     DWORD statusSize = sizeof(request->statusCode);
-    WinHttpQueryHeaders(httpRequest,
-                        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                        WINHTTP_HEADER_NAME_BY_INDEX,
-                        &request->statusCode,
-                        &statusSize,
-                        WINHTTP_NO_HEADER_INDEX);
+    if (!WinHttpQueryHeaders(httpRequest,
+                             WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                             WINHTTP_HEADER_NAME_BY_INDEX,
+                             &request->statusCode,
+                             &statusSize,
+                             WINHTTP_NO_HEADER_INDEX)) {
+        network_api_set_error(request, "Could not read HTTPS response status");
+        goto cleanup;
+    }
 
     DWORD headerSize = 0;
     WinHttpQueryHeaders(httpRequest, WINHTTP_QUERY_RAW_HEADERS_CRLF,
@@ -455,9 +471,9 @@ static int network_api_https_request(lua_State* L) {
             size_t valueLength = 0;
             const char* name = lua_tolstring(L, -2, &nameLength);
             const char* value = lua_tolstring(L, -1, &valueLength);
-            if (nameLength == 0 || memchr(name, '\0', nameLength) != NULL ||
-                memchr(value, '\0', valueLength) != NULL || strchr(name, ':') != NULL ||
-                network_api_contains_line_break(name) ||
+            if (!network_api_valid_header_name(name) ||
+                memchr(name, '\0', nameLength) != NULL ||
+                memchr(value, '\0', valueLength) != NULL ||
                 network_api_contains_line_break(value)) {
                 lua_pop(L, 2);
                 lua_pop(L, 1);
