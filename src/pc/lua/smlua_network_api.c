@@ -61,10 +61,6 @@ static bool network_api_has_https_prefix(const char* url) {
     return true;
 }
 
-static bool network_api_contains_line_break(const char* value) {
-    return strchr(value, '\r') != NULL || strchr(value, '\n') != NULL;
-}
-
 static bool network_api_valid_token(const char* value) {
     if (value[0] == '\0') { return false; }
     for (const unsigned char* c = (const unsigned char*)value; *c != '\0'; c++) {
