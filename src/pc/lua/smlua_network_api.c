@@ -48,6 +48,7 @@ static unsigned int sNetworkApiRequestCount = 0;
 
 static bool network_api_has_https_prefix(const char* url) {
     static const char prefix[] = "https://";
+    if (strlen(url) < sizeof(prefix) - 1) { return false; }
     for (size_t i = 0; i < sizeof(prefix) - 1; i++) {
         if (tolower((unsigned char)url[i]) != prefix[i]) { return false; }
     }
@@ -322,7 +323,8 @@ static int network_api_https_request(lua_State* L) {
     }
     size_t urlLength = 0;
     const char* url = lua_tolstring(L, -1, &urlLength);
-    if (urlLength == 0 || urlLength > NETWORK_API_MAX_URL || !network_api_has_https_prefix(url)) {
+    if (urlLength == 0 || urlLength > NETWORK_API_MAX_URL ||
+        memchr(url, '\0', urlLength) != NULL || !network_api_has_https_prefix(url)) {
         lua_pop(L, 1);
         lua_pushnil(L);
         lua_pushstring(L, "Only valid https:// URLs up to 2048 bytes are accepted");
@@ -354,7 +356,8 @@ static int network_api_https_request(lua_State* L) {
         size_t methodLength = 0;
         const char* method = lua_tolstring(L, -1, &methodLength);
         if (lua_type(L, -1) != LUA_TSTRING || methodLength == 0 ||
-            methodLength > NETWORK_API_MAX_METHOD || network_api_contains_line_break(method)) {
+            methodLength > NETWORK_API_MAX_METHOD || memchr(method, '\0', methodLength) != NULL ||
+            network_api_contains_line_break(method)) {
             lua_pop(L, 1);
             network_api_free_request(request);
             lua_pushnil(L);
@@ -435,9 +438,13 @@ static int network_api_https_request(lua_State* L) {
                 lua_pushstring(L, "Header names and values must be strings");
                 return 2;
             }
-            const char* name = lua_tostring(L, -2);
-            const char* value = lua_tostring(L, -1);
-            if (network_api_contains_line_break(name) || network_api_contains_line_break(value)) {
+            size_t nameLength = 0;
+            size_t valueLength = 0;
+            const char* name = lua_tolstring(L, -2, &nameLength);
+            const char* value = lua_tolstring(L, -1, &valueLength);
+            if (memchr(name, '\0', nameLength) != NULL || memchr(value, '\0', valueLength) != NULL ||
+                strchr(name, ':') != NULL || network_api_contains_line_break(name) ||
+                network_api_contains_line_break(value)) {
                 lua_pop(L, 2);
                 lua_pop(L, 1);
                 network_api_free_request(request);
@@ -527,6 +534,7 @@ void smlua_network_api_update(lua_State* L) {
         if (completed->threadStarted) { pthread_join(completed->thread, NULL); }
         struct Mod* owner = network_api_find_active_mod(completed->ownerPath);
         if (owner != NULL && owner->networkAccessAllowed && L != NULL) {
+            int previousTop = lua_gettop(L);
             lua_rawgeti(L, LUA_REGISTRYINDEX, completed->callbackRef);
             if (completed->statusCode > 0) {
                 lua_pushinteger(L, completed->statusCode);
@@ -545,6 +553,7 @@ void smlua_network_api_update(lua_State* L) {
             if (smlua_call_hook(L, 4, 0, 0, owner, NULL) != LUA_OK) {
                 LOG_LUA("Failed to call network HTTPS completion callback");
             }
+            lua_settop(L, previousTop);
         }
         luaL_unref(L, LUA_REGISTRYINDEX, completed->callbackRef);
         network_api_free_request(completed);
