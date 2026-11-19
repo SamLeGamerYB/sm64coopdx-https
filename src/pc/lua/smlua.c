@@ -1,6 +1,7 @@
 #include "smlua.h"
 #include "pc/lua/smlua_require.h"
 #include "pc/lua/smlua_live_reload.h"
+#include "pc/lua/smlua_network_api.h"
 #include "game/hardcoded.h"
 #include "pc/mods/mods.h"
 #include "pc/mods/mods_utils.h"
@@ -335,6 +336,7 @@ void smlua_init(void) {
     smlua_bind_hooks();
     smlua_bind_cobject();
     smlua_bind_functions();
+    smlua_network_api_bind(L);
     smlua_bind_functions_autogen();
     smlua_bind_sync_table();
     smlua_init_require_system();
@@ -398,6 +400,7 @@ void smlua_update(void) {
 
     if (network_allow_mod_dev_mode()) { smlua_live_reload_update(L); }
 
+    smlua_network_api_update(L);
     audio_sample_destroy_pending_copies();
 
     smlua_call_event_hooks(HOOK_UPDATE);
@@ -417,6 +420,8 @@ void smlua_update(void) {
 }
 
 void smlua_shutdown(void) {
+    lua_State* L = gLuaState;
+    smlua_network_api_shutdown(L);
     hardcoded_reset_default_values();
     smlua_text_utils_reset_all();
     smlua_audio_utils_reset_all();
@@ -427,7 +432,6 @@ void smlua_shutdown(void) {
     smlua_anim_util_reset();
     mod_storage_shutdown();
     mod_fs_shutdown();
-    lua_State* L = gLuaState;
     if (L != NULL) {
         lua_close(L);
         gLuaState = NULL;
