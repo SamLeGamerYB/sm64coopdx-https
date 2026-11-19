@@ -83,7 +83,9 @@ struct NetworkWebSocket {
     int callbackRefs[4];
     char ownerPath[SYS_MAX_PATH];
     char* url;
+#ifdef _WIN32
     HINTERNET socket;
+#endif
     pthread_cond_t condition;
     struct NetworkWebSocketMessage* sendHead;
     struct NetworkWebSocketMessage* sendTail;
@@ -407,6 +409,328 @@ cleanup:
     request->complete = true;
     pthread_mutex_unlock(&sNetworkApiMutex);
     return NULL;
+}
+#endif
+
+
+#ifdef _WIN32
+static bool network_api_has_wss_prefix(const char* url) {
+    static const char prefix[] = "wss://";
+    if (strlen(url) < sizeof(prefix) - 1) { return false; }
+    for (size_t i = 0; i < sizeof(prefix) - 1; i++) {
+        if (tolower((unsigned char)url[i]) != prefix[i]) { return false; }
+    }
+    return true;
+}
+
+static void network_api_ws_queue_event(struct NetworkWebSocket* ws,
+                                       enum NetworkWebSocketEventType type,
+                                       const char* payload, size_t payloadLength,
+                                       bool binary) {
+    struct NetworkWebSocketEvent* event = calloc(1, sizeof(*event));
+    if (event == NULL) { return; }
+    if (payloadLength > 0) {
+        event->payload = malloc(payloadLength);
+        if (event->payload == NULL) { free(event); return; }
+        memcpy(event->payload, payload, payloadLength);
+    }
+    event->payloadLength = payloadLength;
+    event->type = type;
+    event->binary = binary;
+    pthread_mutex_lock(&sNetworkApiMutex);
+    if (ws->eventTail == NULL) { ws->eventHead = event; }
+    else { ws->eventTail->next = event; }
+    ws->eventTail = event;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+}
+
+static void network_api_ws_set_error(struct NetworkWebSocket* ws, const char* message) {
+    network_api_ws_queue_event(ws, NETWORK_WS_EVENT_ERROR, message, strlen(message), false);
+}
+
+static void network_api_ws_free_messages(struct NetworkWebSocket* ws) {
+    struct NetworkWebSocketMessage* message = ws->sendHead;
+    while (message != NULL) {
+        struct NetworkWebSocketMessage* next = message->next;
+        free(message->payload);
+        free(message);
+        message = next;
+    }
+    ws->sendHead = ws->sendTail = NULL;
+}
+
+static void* network_api_ws_send_worker(void* argument) {
+    struct NetworkWebSocket* ws = argument;
+    for (;;) {
+        pthread_mutex_lock(&sNetworkApiMutex);
+        while (ws->sendHead == NULL && !ws->closeRequested) {
+            pthread_cond_wait(&ws->condition, &sNetworkApiMutex);
+        }
+        struct NetworkWebSocketMessage* message = ws->sendHead;
+        if (message != NULL) {
+            ws->sendHead = message->next;
+            if (ws->sendHead == NULL) { ws->sendTail = NULL; }
+        }
+        bool closeRequested = ws->closeRequested;
+        pthread_mutex_unlock(&sNetworkApiMutex);
+
+        if (message != NULL) {
+            WINHTTP_WEB_SOCKET_BUFFER_TYPE type = message->binary
+                ? WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE
+                : WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE;
+            DWORD result = WinHttpWebSocketSend(ws->socket, type,
+                                                message->payload,
+                                                (DWORD)message->payloadLength);
+            free(message->payload);
+            free(message);
+            if (result != NO_ERROR) {
+                network_api_ws_set_error(ws, "WebSocket send failed");
+                pthread_mutex_lock(&sNetworkApiMutex);
+                ws->closeRequested = true;
+                pthread_cond_broadcast(&ws->condition);
+                pthread_mutex_unlock(&sNetworkApiMutex);
+            }
+            continue;
+        }
+        if (closeRequested) {
+            WinHttpWebSocketClose(ws->socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS,
+                                  NULL, 0);
+            break;
+        }
+    }
+    return NULL;
+}
+
+static void* network_api_ws_receive_worker(void* argument) {
+    struct NetworkWebSocket* ws = argument;
+    char chunk[16384];
+    char* message = NULL;
+    size_t messageLength = 0;
+    bool messageBinary = false;
+    for (;;) {
+        DWORD bytesRead = 0;
+        WINHTTP_WEB_SOCKET_BUFFER_TYPE bufferType;
+        DWORD result = WinHttpWebSocketReceive(ws->socket, chunk, sizeof(chunk),
+                                               &bytesRead, &bufferType);
+        if (result != NO_ERROR) {
+            pthread_mutex_lock(&sNetworkApiMutex);
+            bool expectedClose = ws->closeRequested;
+            ws->closeRequested = true;
+            pthread_cond_broadcast(&ws->condition);
+            pthread_mutex_unlock(&sNetworkApiMutex);
+            if (!expectedClose) { network_api_ws_set_error(ws, "WebSocket receive failed"); }
+            break;
+        }
+        if (bufferType == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) {
+            network_api_ws_queue_event(ws, NETWORK_WS_EVENT_CLOSE, NULL, 0, false);
+            pthread_mutex_lock(&sNetworkApiMutex);
+            ws->closeRequested = true;
+            pthread_cond_broadcast(&ws->condition);
+            pthread_mutex_unlock(&sNetworkApiMutex);
+            break;
+        }
+
+        if (messageLength == 0) {
+            messageBinary = bufferType == WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE ||
+                            bufferType == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE;
+        }
+        if ((size_t)bytesRead > NETWORK_WS_MAX_MESSAGE - messageLength) {
+            free(message);
+            message = NULL;
+            messageLength = 0;
+            network_api_ws_set_error(ws, "WebSocket message exceeds the 1 MiB limit");
+            pthread_mutex_lock(&sNetworkApiMutex);
+            ws->closeRequested = true;
+            pthread_cond_broadcast(&ws->condition);
+            pthread_mutex_unlock(&sNetworkApiMutex);
+            break;
+        }
+        if (bytesRead > 0) {
+            char* expanded = realloc(message, messageLength + bytesRead);
+            if (expanded == NULL) {
+                free(message);
+                message = NULL;
+                messageLength = 0;
+                network_api_ws_set_error(ws, "Out of memory receiving WebSocket message");
+                pthread_mutex_lock(&sNetworkApiMutex);
+                ws->closeRequested = true;
+                pthread_cond_broadcast(&ws->condition);
+                pthread_mutex_unlock(&sNetworkApiMutex);
+                break;
+            }
+            message = expanded;
+            memcpy(message + messageLength, chunk, bytesRead);
+            messageLength += bytesRead;
+        }
+
+        if (bufferType == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE ||
+            bufferType == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE) {
+            network_api_ws_queue_event(ws, NETWORK_WS_EVENT_MESSAGE,
+                                       message, messageLength, messageBinary);
+            free(message);
+            message = NULL;
+            messageLength = 0;
+        }
+    }
+    free(message);
+    return NULL;
+}
+
+static void* network_api_ws_worker(void* argument) {
+    struct NetworkWebSocket* ws = argument;
+    HINTERNET session = NULL;
+    HINTERNET connection = NULL;
+    HINTERNET request = NULL;
+    HINTERNET socket = NULL;
+    wchar_t* wideUrl = NULL;
+    wchar_t* host = NULL;
+    wchar_t* path = NULL;
+
+    wideUrl = network_api_utf8_to_wide(ws->url);
+    if (wideUrl == NULL) {
+        network_api_ws_set_error(ws, "Invalid UTF-8 in WebSocket URL");
+        goto cleanup;
+    }
+
+    URL_COMPONENTS components;
+    memset(&components, 0, sizeof(components));
+    components.dwStructSize = sizeof(components);
+    components.dwSchemeLength = (DWORD)-1;
+    components.dwHostNameLength = (DWORD)-1;
+    components.dwUserNameLength = (DWORD)-1;
+    components.dwPasswordLength = (DWORD)-1;
+    components.dwUrlPathLength = (DWORD)-1;
+    components.dwExtraInfoLength = (DWORD)-1;
+    if (!WinHttpCrackUrl(wideUrl, 0, 0, &components) ||
+        components.nScheme != INTERNET_SCHEME_HTTPS ||
+        components.dwUserNameLength > 0 || components.dwPasswordLength > 0) {
+        network_api_ws_set_error(ws, "Invalid WSS URL");
+        goto cleanup;
+    }
+
+    host = calloc((size_t)components.dwHostNameLength + 1, sizeof(wchar_t));
+    path = calloc((size_t)components.dwUrlPathLength + (size_t)components.dwExtraInfoLength + 2, sizeof(wchar_t));
+    if (host == NULL || path == NULL) {
+        network_api_ws_set_error(ws, "Out of memory");
+        goto cleanup;
+    }
+    wcsncpy(host, components.lpszHostName, components.dwHostNameLength);
+    if (components.dwUrlPathLength > 0) {
+        wcsncat(path, components.lpszUrlPath, components.dwUrlPathLength);
+    } else {
+        wcscat(path, L"/");
+    }
+    if (components.dwExtraInfoLength > 0) {
+        wcsncat(path, components.lpszExtraInfo, components.dwExtraInfoLength);
+    }
+
+    session = WinHttpOpen(L"SM64CoopDX Network API/1.0",
+                          WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (session == NULL) {
+        network_api_ws_set_error(ws, "Could not initialize WinHTTP");
+        goto cleanup;
+    }
+    WinHttpSetTimeouts(session, 5000, 5000, NETWORK_API_TIMEOUT_MS, NETWORK_API_TIMEOUT_MS);
+    connection = WinHttpConnect(session, host, components.nPort, 0);
+    if (connection == NULL) {
+        network_api_ws_set_error(ws, "WebSocket connection failed");
+        goto cleanup;
+    }
+    request = WinHttpOpenRequest(connection, L"GET", path, NULL,
+                                 WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                 WINHTTP_FLAG_SECURE);
+    if (request == NULL) {
+        network_api_ws_set_error(ws, "Could not create WSS handshake");
+        goto cleanup;
+    }
+    DWORD disabledFeatures = WINHTTP_DISABLE_REDIRECTS |
+                             WINHTTP_DISABLE_COOKIES |
+                             WINHTTP_DISABLE_AUTHENTICATION;
+    if (!WinHttpSetOption(request, WINHTTP_OPTION_DISABLE_FEATURE,
+                          &disabledFeatures, sizeof(disabledFeatures))) {
+        network_api_ws_set_error(ws, "Could not enforce secure WebSocket policy");
+        goto cleanup;
+    }
+    if (!WinHttpSetOption(request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, NULL, 0) ||
+        !WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+        !WinHttpReceiveResponse(request, NULL)) {
+        network_api_ws_set_error(ws, "WSS handshake failed");
+        goto cleanup;
+    }
+    socket = WinHttpWebSocketCompleteUpgrade(request, 0);
+    if (socket == NULL) {
+        network_api_ws_set_error(ws, "Server did not accept the WebSocket upgrade");
+        goto cleanup;
+    }
+    WinHttpCloseHandle(request);
+    request = NULL;
+
+    pthread_mutex_lock(&sNetworkApiMutex);
+    ws->socket = socket;
+    ws->connected = true;
+    bool closeImmediately = ws->closeRequested;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    network_api_ws_queue_event(ws, NETWORK_WS_EVENT_OPEN, NULL, 0, false);
+
+    if (pthread_create(&ws->sendThread, NULL, network_api_ws_send_worker, ws) == 0) {
+        ws->sendThreadStarted = true;
+    } else {
+        network_api_ws_set_error(ws, "Could not start WebSocket sender");
+        pthread_mutex_lock(&sNetworkApiMutex);
+        ws->closeRequested = true;
+        pthread_cond_broadcast(&ws->condition);
+        pthread_mutex_unlock(&sNetworkApiMutex);
+    }
+    if (pthread_create(&ws->receiveThread, NULL, network_api_ws_receive_worker, ws) == 0) {
+        ws->receiveThreadStarted = true;
+    } else {
+        network_api_ws_set_error(ws, "Could not start WebSocket receiver");
+        pthread_mutex_lock(&sNetworkApiMutex);
+        ws->closeRequested = true;
+        pthread_cond_broadcast(&ws->condition);
+        pthread_mutex_unlock(&sNetworkApiMutex);
+    }
+    if (closeImmediately) {
+        pthread_mutex_lock(&sNetworkApiMutex);
+        ws->closeRequested = true;
+        pthread_cond_broadcast(&ws->condition);
+        pthread_mutex_unlock(&sNetworkApiMutex);
+    }
+    if (ws->sendThreadStarted) { pthread_join(ws->sendThread, NULL); }
+    if (ws->receiveThreadStarted) { pthread_join(ws->receiveThread, NULL); }
+    network_api_ws_free_messages(ws);
+    network_api_ws_queue_event(ws, NETWORK_WS_EVENT_CLOSE, NULL, 0, false);
+
+cleanup:
+    if (socket != NULL) { WinHttpCloseHandle(socket); }
+    if (request != NULL) { WinHttpCloseHandle(request); }
+    if (connection != NULL) { WinHttpCloseHandle(connection); }
+    if (session != NULL) { WinHttpCloseHandle(session); }
+    free(wideUrl);
+    free(host);
+    free(path);
+    pthread_mutex_lock(&sNetworkApiMutex);
+    ws->socket = NULL;
+    ws->complete = true;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    return NULL;
+}
+
+static void network_api_ws_free(struct NetworkWebSocket* ws) {
+    if (ws == NULL) { return; }
+    network_api_ws_free_messages(ws);
+    struct NetworkWebSocketEvent* event = ws->eventHead;
+    while (event != NULL) {
+        struct NetworkWebSocketEvent* next = event->next;
+        free(event->payload);
+        free(event);
+        event = next;
+    }
+    free(ws->url);
+    pthread_cond_destroy(&ws->condition);
+    free(ws);
 }
 #endif
 
