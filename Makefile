@@ -857,7 +857,7 @@ LDFLAGS += -lz
 
 # Update checker library
 ifeq ($(WINDOWS_BUILD),1)
-  LDFLAGS += -lwininet
+  LDFLAGS += -lwininet -lwinhttp
 else
   LDFLAGS += -lcurl
 endif
