@@ -625,7 +625,8 @@ static void save_name_write(FILE* file) {
 }
 
 static const struct FunctionConfigOption functionOptions[] = {
-    { .name = "enable-mod:", .read = enable_mod_read, .write = enable_mod_write },\n    { .name = "allow-mod-network:", .read = allow_mod_network_read, .write = allow_mod_network_write },
+    { .name = "enable-mod:", .read = enable_mod_read, .write = enable_mod_write },
+    { .name = "allow-mod-network:", .read = allow_mod_network_read, .write = allow_mod_network_write },
     { .name = "ban:",        .read = ban_read,        .write = ban_write        },
     { .name = "moderator:",  .read = moderator_read,  .write = moderator_write  },
     { .name = "dynos-pack:", .read = dynos_pack_read, .write = dynos_pack_write },
