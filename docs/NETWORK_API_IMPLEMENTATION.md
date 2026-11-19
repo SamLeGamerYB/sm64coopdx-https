@@ -27,6 +27,7 @@ This file records repository-specific integration constraints and the current im
 - Lua surface: `network.has_permission()`, `network.is_supported()`, `network.https_request(options, callback)`, owner-only `network.cancel_request(requestId)`, and `network.websocket_connect(url, callbacks)`, `network.websocket_send(id, payload, kind)`, `network.websocket_close(id)`.
 - The HTTPS request accepts a caller-selected method, headers, and optional body. The callback receives `statusCode, rawResponseHeaders, responseBody, errorMessage`.
 - At most 8 completed HTTPS callbacks are dispatched per game update, matching the maximum number of concurrent requests.
+- At most 32 queued WebSocket events are dispatched per game update; each socket also has bounded incoming and outgoing queues.
 - Workers never call Lua. Completed requests are checked and dispatched from `smlua_update()` through `smlua_call_hook()`.
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
 - When a mod file is hot-reloaded or the user revokes its network permission, its pending HTTP requests are marked cancelled, its WebSockets are asked to close, and callbacks are discarded. The worker checks the flag between synchronous WinHTTP operations; it never closes a handle while another thread is using it.
