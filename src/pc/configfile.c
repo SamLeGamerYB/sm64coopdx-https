@@ -428,10 +428,19 @@ static struct SecretConfigOption secret_options[] = {
 static void allow_mod_network_read(char** tokens, int numTokens) {
     if (numTokens < 2) { return; }
 
-    char relativePath[256] = { 0 };
+    char relativePath[SYS_MAX_PATH] = { 0 };
+    size_t used = 0;
     for (int i = 1; i < numTokens; i++) {
-        if (i != 1) { strncat(relativePath, " ", sizeof(relativePath) - 1); }
-        strncat(relativePath, tokens[i], sizeof(relativePath) - strlen(relativePath) - 1);
+        if (i != 1 && used + 1 < sizeof(relativePath)) {
+            relativePath[used++] = ' ';
+            relativePath[used] = '\0';
+        }
+        size_t available = sizeof(relativePath) - used - 1;
+        size_t length = strlen(tokens[i]);
+        if (length > available) { length = available; }
+        memcpy(relativePath + used, tokens[i], length);
+        used += length;
+        relativePath[used] = '\0';
     }
 
     for (unsigned int i = 0; i < gLocalMods.entryCount; i++) {
