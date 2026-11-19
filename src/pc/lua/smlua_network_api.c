@@ -65,12 +65,26 @@ static bool network_api_contains_line_break(const char* value) {
     return strchr(value, '\r') != NULL || strchr(value, '\n') != NULL;
 }
 
-static bool network_api_valid_header_name(const char* name) {
-    if (name[0] == '\0') { return false; }
-    for (const unsigned char* c = (const unsigned char*)name; *c != '\0'; c++) {
+static bool network_api_valid_token(const char* value) {
+    if (value[0] == '\0') { return false; }
+    for (const unsigned char* c = (const unsigned char*)value; *c != '\0'; c++) {
         if (!(isalnum(*c) || strchr("!#$%&'*+-.^_`|~", *c) != NULL)) {
             return false;
         }
+    }
+    return true;
+}
+
+static bool network_api_valid_header_value(const char* value) {
+    for (const unsigned char* c = (const unsigned char*)value; *c != '\0'; c++) {
+        if ((*c < 0x20 && *c != '\t') || *c == 0x7f) { return false; }
+    }
+    return true;
+}
+
+static bool network_api_valid_url_text(const char* value) {
+    for (const unsigned char* c = (const unsigned char*)value; *c != '\0'; c++) {
+        if (*c <= 0x20 || *c == 0x7f) { return false; }
     }
     return true;
 }
@@ -353,7 +367,8 @@ static int network_api_https_request(lua_State* L) {
     size_t urlLength = 0;
     const char* url = lua_tolstring(L, -1, &urlLength);
     if (urlLength == 0 || urlLength > NETWORK_API_MAX_URL ||
-        memchr(url, '\0', urlLength) != NULL || !network_api_has_https_prefix(url)) {
+        memchr(url, '\0', urlLength) != NULL || !network_api_valid_url_text(url) ||
+        !network_api_has_https_prefix(url)) {
         lua_pop(L, 1);
         lua_pushnil(L);
         lua_pushstring(L, "Only valid https:// URLs up to 2048 bytes are accepted");
@@ -386,7 +401,7 @@ static int network_api_https_request(lua_State* L) {
         const char* method = lua_tolstring(L, -1, &methodLength);
         if (lua_type(L, -1) != LUA_TSTRING || methodLength == 0 ||
             methodLength > NETWORK_API_MAX_METHOD || memchr(method, '\0', methodLength) != NULL ||
-            network_api_contains_line_break(method)) {
+            !network_api_valid_token(method)) {
             lua_pop(L, 1);
             network_api_free_request(request);
             lua_pushnil(L);
@@ -471,10 +486,10 @@ static int network_api_https_request(lua_State* L) {
             size_t valueLength = 0;
             const char* name = lua_tolstring(L, -2, &nameLength);
             const char* value = lua_tolstring(L, -1, &valueLength);
-            if (!network_api_valid_header_name(name) ||
+            if (!network_api_valid_token(name) ||
                 memchr(name, '\0', nameLength) != NULL ||
                 memchr(value, '\0', valueLength) != NULL ||
-                network_api_contains_line_break(value)) {
+                !network_api_valid_header_value(value)) {
                 lua_pop(L, 2);
                 lua_pop(L, 1);
                 network_api_free_request(request);
