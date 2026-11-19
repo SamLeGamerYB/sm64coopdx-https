@@ -70,6 +70,7 @@ Windows 8 or newer builds accept only `wss://` URLs. The connection is asynchron
 local socketId, err = network.websocket_connect("wss://example.invalid/socket", {
     on_open = function(id)
         print("Connected", id)
+        network.websocket_send(id, "hello", "text")
     end,
     on_message = function(id, payload, isBinary)
         if isBinary then
@@ -89,7 +90,8 @@ local socketId, err = network.websocket_connect("wss://example.invalid/socket", 
 })
 
 if socketId then
-    network.websocket_send(socketId, "hello", "text")
+    -- The ID is returned before the handshake completes.
+    -- Send messages from on_open, once the connection is ready.
     -- For binary data, pass "binary" as the third argument.
     -- network.websocket_send(socketId, binary_payload, "binary")
     -- network.websocket_close(socketId)
