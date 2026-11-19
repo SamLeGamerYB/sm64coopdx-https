@@ -264,8 +264,16 @@ static void* network_api_http_worker(void* argument) {
         network_api_set_error(request, "HTTPS request could not be sent");
         goto cleanup;
     }
+    if (network_api_request_is_cancelled(request)) {
+        network_api_set_error(request, "HTTPS request was cancelled");
+        goto cleanup;
+    }
     if (!WinHttpReceiveResponse(httpRequest, NULL)) {
         network_api_set_error(request, "HTTPS response could not be received");
+        goto cleanup;
+    }
+    if (network_api_request_is_cancelled(request)) {
+        network_api_set_error(request, "HTTPS request was cancelled");
         goto cleanup;
     }
 
@@ -297,6 +305,10 @@ static void* network_api_http_worker(void* argument) {
 
     DWORD responseStarted = GetTickCount();
     for (;;) {
+        if (network_api_request_is_cancelled(request)) {
+            network_api_set_error(request, "HTTPS request was cancelled");
+            break;
+        }
         if (GetTickCount() - responseStarted > 30000) {
             network_api_set_error(request, "HTTPS response exceeded the 30 second time limit");
             break;
