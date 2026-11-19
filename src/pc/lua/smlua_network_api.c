@@ -99,6 +99,7 @@ struct NetworkWebSocket {
     int callbackRefs[4];
     char ownerPath[SYS_MAX_PATH];
     char* url;
+    char* headers;
 #ifdef _WIN32
     HINTERNET socket;
 #endif
@@ -628,6 +629,7 @@ static void* network_api_ws_worker(void* argument) {
     HINTERNET request = NULL;
     HINTERNET socket = NULL;
     wchar_t* wideUrl = NULL;
+    wchar_t* wideHeaders = NULL;
     wchar_t* host = NULL;
     wchar_t* path = NULL;
     char* httpsUrl = malloc(strlen(ws->url) + 3);
@@ -641,6 +643,13 @@ static void* network_api_ws_worker(void* argument) {
     if (wideUrl == NULL) {
         network_api_ws_set_error(ws, "Invalid UTF-8 in WebSocket URL");
         goto cleanup;
+    }
+    if (ws->headers != NULL && ws->headers[0] != '\0') {
+        wideHeaders = network_api_utf8_to_wide(ws->headers);
+        if (wideHeaders == NULL) {
+            network_api_ws_set_error(ws, "Invalid UTF-8 in WebSocket headers");
+            goto cleanup;
+        }
     }
 
     URL_COMPONENTS components;
@@ -696,6 +705,11 @@ static void* network_api_ws_worker(void* argument) {
                                  WINHTTP_FLAG_SECURE);
     if (request == NULL) {
         network_api_ws_set_error(ws, "Could not create WSS handshake");
+        goto cleanup;
+    }
+    if (wideHeaders != NULL &&
+        !WinHttpAddRequestHeaders(request, wideHeaders, (DWORD)-1L, WINHTTP_ADDREQ_FLAG_ADD)) {
+        network_api_ws_set_error(ws, "Could not add WebSocket request headers");
         goto cleanup;
     }
     DWORD disabledFeatures = WINHTTP_DISABLE_REDIRECTS |
@@ -786,6 +800,7 @@ cleanup:
     if (connection != NULL) { WinHttpCloseHandle(connection); }
     if (session != NULL) { WinHttpCloseHandle(session); }
     free(wideUrl);
+    free(wideHeaders);
     free(host);
     free(path);
     pthread_mutex_lock(&sNetworkApiMutex);
@@ -806,6 +821,7 @@ static void network_api_ws_free(struct NetworkWebSocket* ws) {
         event = next;
     }
     free(ws->url);
+    free(ws->headers);
     pthread_cond_destroy(&ws->condition);
     free(ws);
 }
@@ -822,9 +838,11 @@ static struct NetworkWebSocket* network_api_ws_find_locked(unsigned int id, cons
 #endif
 
 static int network_api_websocket_connect(lua_State* L) {
-    if (lua_gettop(L) != 2 || lua_type(L, 1) != LUA_TSTRING || lua_type(L, 2) != LUA_TTABLE) {
+    if ((lua_gettop(L) != 2 && lua_gettop(L) != 3) ||
+        lua_type(L, 1) != LUA_TSTRING || lua_type(L, 2) != LUA_TTABLE ||
+        (lua_gettop(L) == 3 && !lua_isnil(L, 3) && lua_type(L, 3) != LUA_TTABLE)) {
         lua_pushnil(L);
-        lua_pushstring(L, "websocket_connect expects a WSS URL and a callbacks table");
+        lua_pushstring(L, "websocket_connect expects a WSS URL, callbacks table, and optional headers table");
         return 2;
     }
     struct Mod* owner = gLuaActiveMod;
@@ -882,6 +900,53 @@ static int network_api_websocket_connect(lua_State* L) {
     memcpy(ws->url, url, urlLength);
     ws->url[urlLength] = '\0';
     snprintf(ws->ownerPath, sizeof(ws->ownerPath), "%s", owner->relativePath);
+
+    ws->headers = calloc(NETWORK_API_MAX_HEADERS + 1, 1);
+    if (ws->headers == NULL) {
+        network_api_ws_free(ws);
+        lua_pushnil(L);
+        lua_pushstring(L, "Out of memory");
+        return 2;
+    }
+    if (lua_gettop(L) == 3 && lua_istable(L, 3)) {
+        size_t used = 0;
+        lua_pushnil(L);
+        while (lua_next(L, 3) != 0) {
+            if (lua_type(L, -2) != LUA_TSTRING || lua_type(L, -1) != LUA_TSTRING) {
+                lua_pop(L, 2);
+                network_api_ws_free(ws);
+                lua_pushnil(L);
+                lua_pushstring(L, "WebSocket header names and values must be strings");
+                return 2;
+            }
+            size_t nameLength = 0;
+            size_t valueLength = 0;
+            const char* name = lua_tolstring(L, -2, &nameLength);
+            const char* value = lua_tolstring(L, -1, &valueLength);
+            if (!network_api_valid_token(name) ||
+                memchr(name, '\0', nameLength) != NULL ||
+                memchr(value, '\0', valueLength) != NULL ||
+                !network_api_valid_header_value(value)) {
+                lua_pop(L, 2);
+                network_api_ws_free(ws);
+                lua_pushnil(L);
+                lua_pushstring(L, "Invalid WebSocket header name or value");
+                return 2;
+            }
+            int written = snprintf(ws->headers + used,
+                                   NETWORK_API_MAX_HEADERS + 1 - used,
+                                   "%s: %s\r\n", name, value);
+            if (written < 0 || (size_t)written >= NETWORK_API_MAX_HEADERS + 1 - used) {
+                lua_pop(L, 2);
+                network_api_ws_free(ws);
+                lua_pushnil(L);
+                lua_pushstring(L, "WebSocket headers exceed the 16 KiB limit");
+                return 2;
+            }
+            used += (size_t)written;
+            lua_pop(L, 1);
+        }
+    }
 
     static const char* callbackNames[4] = { "on_open", "on_message", "on_close", "on_error" };
     for (int i = 0; i < 4; i++) {
