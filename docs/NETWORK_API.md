@@ -16,10 +16,12 @@ The API is exposed through the global `network` table.
 ```lua
 local allowed = network.has_permission()
 local supported = network.is_supported()
+local wssSupported = network.websocket_is_supported()
 ```
 
 - `network.has_permission()` returns whether the calling mod has been explicitly allowed to access the network by the user.
 - `network.is_supported()` returns whether this build has a native transport. It currently returns true on Windows and false elsewhere.
+- `network.websocket_is_supported()` checks whether this Windows installation exposes the native WSS functions; it returns false on unsupported platforms or Windows versions.
 
 ## HTTPS requests
 
