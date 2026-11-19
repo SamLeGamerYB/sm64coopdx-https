@@ -5,7 +5,7 @@ The native network API is general-purpose and can be used by any SM64CoopDX Lua 
 ## Current status
 
 - **HTTPS:** implemented for Windows builds in the current feature branch; not yet build-tested.
-- **WebSockets:** planned, not implemented yet.
+- **WebSockets:** Windows WSS connect/send/receive/close code is now implemented in this branch; it has not yet been build-tested.
 - **Linux/macOS:** currently return an explicit unsupported result.
 - **Permissions:** opt-in per local mod, disabled by default.
 
@@ -62,24 +62,58 @@ The function validates the active mod's permission before creating a worker or p
 
 Only `https://` URLs are accepted. WinHTTP redirects, automatic cookies, and ambient authentication are disabled; if this policy cannot be enforced, the request fails. TLS certificate verification remains enabled by WinHTTP defaults. Mods can still provide explicit headers such as `Authorization`. No response is written to disk.
 
-## WebSockets (planned)
+## WebSockets
 
-The planned API will support only `wss://`, and will preserve text and binary message types:
+Windows builds accept only `wss://` URLs. The connection is asynchronous and returns a numeric socket ID immediately. Callback functions are optional:
 
 ```lua
-local socket = network.websocket_connect("wss://example.invalid/socket", {
-    on_open = function() end,
-    on_message = function(message, message_type) end,
-    on_error = function(message) end,
-    on_close = function(code, reason) end,
+local socketId, err = network.websocket_connect("wss://example.invalid/socket", {
+    on_open = function(id)
+        print("Connected", id)
+    end,
+    on_message = function(id, payload, isBinary)
+        if isBinary then
+            print("Received binary data", #payload)
+        else
+            print("Received text", payload)
+        end
+    end,
+    on_error = function(id, message)
+        print("WebSocket error", message)
+    end,
+    on_close = function(id)
+        print("WebSocket closed", id)
+    end,
 })
 
-network.websocket_send(socket, "hello", "text")
-network.websocket_send(socket, binary_payload, "binary")
-network.websocket_close(socket)
+if socketId then
+    network.websocket_send(socketId, "hello", "text")
+    -- For binary data, pass "binary" as the third argument.
+    -- network.websocket_send(socketId, binary_payload, "binary")
+    -- network.websocket_close(socketId)
+else
+    print(err)
+end
 ```
 
-These functions are design examples only and are not available in the current build.
+- `on_open(id)` runs after the WSS handshake succeeds.
+- `on_message(id, payload, isBinary)` receives a Lua string and a boolean distinguishing text from binary frames.
+- `on_error(id, message)` reports transport errors.
+- `on_close(id)` runs when an established connection ends.
+- `websocket_send` and `websocket_close` return booleans. A send returning true means it was queued, not necessarily delivered.
+- A mod may only send to or close socket IDs it created itself.
+
+### WebSocket limits
+
+| Resource | Limit |
+|---|---:|
+| Concurrent connections | 4 |
+| URL length | 2 KiB |
+| Individual message | 1 MiB |
+| Queued outgoing messages | 8 |
+| Queued incoming events | 32 |
+| Queued incoming payload data | 1 MiB |
+
 
 ## Threading and ownership
 
@@ -87,12 +121,11 @@ These functions are design examples only and are not available in the current bu
 - Completion callbacks are dispatched from `smlua_update()` on the game thread.
 - Each request stores a copied mod `relativePath`, not a `struct Mod*`.
 - Callback dispatch re-checks that the owner mod is still active and still has permission.
-- When a mod's network permission is revoked or one of its Lua files is hot-reloaded, its pending HTTP requests are marked cancelled and callbacks are discarded.
-- Lua shutdown marks all requests cancelled, joins workers, and releases callback references before `lua_close()`. A worker already inside a synchronous WinHTTP call must wait for that call to return or time out.
-- The current Windows worker uses bounded WinHTTP timeouts and a response-size limit. Cancellation does not close a handle from another thread; the worker checks the cancellation flag between WinHTTP operations.
+- When a mod's network permission is revoked or one of its Lua files is hot-reloaded, its pending HTTP requests are marked cancelled, WebSockets are asked to close, and callbacks are discarded.
+- Lua shutdown marks requests cancelled, asks WebSockets to close, joins workers, and releases callback references before `lua_close()`. A worker already inside a synchronous WinHTTP call must wait for that call to return or time out.
+- The HTTPS worker uses bounded WinHTTP timeouts and a response-size limit. Cancellation does not close an HTTP handle from another thread; the worker checks the cancellation flag between WinHTTP operations. WebSocket receive/send work is handled by dedicated native threads and bounded queues.
 
 ## Remaining work
 
-- Implement secure WebSocket connect/send/receive/close with text and binary frames.
 - Implement a non-Windows transport backend or continue returning unsupported.
 - Build and test Windows 32-bit/64-bit and all supported non-Windows CI targets.
