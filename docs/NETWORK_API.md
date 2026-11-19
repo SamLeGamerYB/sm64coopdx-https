@@ -41,10 +41,13 @@ end)
 
 if requestId == nil then
     print(err)
+else
+    -- Later, before completion:
+    network.cancel_request(requestId)
 end
 ```
 
-The function validates the active mod's permission before creating a worker or performing network activity. It returns a numeric request ID immediately; the completion callback runs later on the game thread. Cancellation is not exposed yet.
+The function validates the active mod's permission before creating a worker or performing network activity. It returns a numeric request ID immediately; the completion callback runs later on the game thread. The creating mod can cancel its own pending request with `network.cancel_request(requestId)`, which returns a boolean.
 
 ### HTTPS limits
 
@@ -84,8 +87,8 @@ These functions are design examples only and are not available in the current bu
 - Completion callbacks are dispatched from `smlua_update()` on the game thread.
 - Each request stores a copied mod `relativePath`, not a `struct Mod*`.
 - Callback dispatch re-checks that the owner mod is still active and still has permission.
-- When a mod's Lua file is hot-reloaded, pending callbacks from the previous script version are discarded. The underlying HTTP operation may continue until it completes or times out.
-- Lua shutdown joins active workers and releases callback references before `lua_close()`.
+- When a mod's Lua file is hot-reloaded, its pending HTTP requests are cancelled and callbacks from the previous script version are discarded.
+- Lua shutdown closes active WinHTTP request handles, joins workers, and releases callback references before `lua_close()`.
 - The current Windows worker uses bounded WinHTTP timeouts and a response-size limit. A shutdown may wait for an in-flight request to time out.
 
 ## Remaining work
