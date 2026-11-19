@@ -89,8 +89,12 @@ struct NetworkWebSocket {
     pthread_cond_t condition;
     struct NetworkWebSocketMessage* sendHead;
     struct NetworkWebSocketMessage* sendTail;
+    unsigned int sendCount;
+    size_t sendBytes;
     struct NetworkWebSocketEvent* eventHead;
     struct NetworkWebSocketEvent* eventTail;
+    unsigned int eventCount;
+    size_t eventBytes;
     struct NetworkWebSocket* next;
 };
 
@@ -440,7 +444,17 @@ static void network_api_ws_queue_event(struct NetworkWebSocket* ws,
     pthread_mutex_lock(&sNetworkApiMutex);
     if (ws->eventTail == NULL) { ws->eventHead = event; }
     else { ws->eventTail->next = event; }
+    if (ws->eventCount >= 32 || payloadLength > NETWORK_WS_MAX_MESSAGE - ws->eventBytes) {
+        ws->closeRequested = true;
+        pthread_cond_broadcast(&ws->condition);
+        pthread_mutex_unlock(&sNetworkApiMutex);
+        free(event->payload);
+        free(event);
+        return;
+    }
     ws->eventTail = event;
+    ws->eventCount++;
+    ws->eventBytes += payloadLength;
     pthread_mutex_unlock(&sNetworkApiMutex);
 }
 
@@ -470,6 +484,8 @@ static void* network_api_ws_send_worker(void* argument) {
         if (message != NULL) {
             ws->sendHead = message->next;
             if (ws->sendHead == NULL) { ws->sendTail = NULL; }
+            if (ws->sendCount > 0) { ws->sendCount--; }
+            if (ws->sendBytes >= message->payloadLength) { ws->sendBytes -= message->payloadLength; }
         }
         bool closeRequested = ws->closeRequested;
         pthread_mutex_unlock(&sNetworkApiMutex);
@@ -737,6 +753,212 @@ static void network_api_ws_free(struct NetworkWebSocket* ws) {
     free(ws);
 }
 #endif
+
+
+static struct NetworkWebSocket* network_api_ws_find_locked(unsigned int id, const char* ownerPath) {
+    for (struct NetworkWebSocket* ws = sNetworkWebSockets; ws != NULL; ws = ws->next) {
+        if (ws->id == id && strcmp(ws->ownerPath, ownerPath) == 0) { return ws; }
+    }
+    return NULL;
+}
+
+static int network_api_websocket_connect(lua_State* L) {
+    if (lua_gettop(L) != 2 || lua_type(L, 1) != LUA_TSTRING || lua_type(L, 2) != LUA_TTABLE) {
+        lua_pushnil(L);
+        lua_pushstring(L, "websocket_connect expects a WSS URL and a callbacks table");
+        return 2;
+    }
+    struct Mod* owner = gLuaActiveMod;
+    if (owner == NULL || !owner->networkAccessAllowed) {
+        lua_pushnil(L);
+        lua_pushstring(L, "This mod has not been granted network access");
+        return 2;
+    }
+#ifndef _WIN32
+    lua_pushnil(L);
+    lua_pushstring(L, "WSS transport is currently supported on Windows only");
+    return 2;
+#else
+    size_t urlLength = 0;
+    const char* url = lua_tolstring(L, 1, &urlLength);
+    if (urlLength == 0 || urlLength > NETWORK_API_MAX_URL ||
+        memchr(url, '\0', urlLength) != NULL || !network_api_valid_url_text(url) ||
+        !network_api_has_wss_prefix(url)) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Only valid wss:// URLs up to 2048 bytes are accepted");
+        return 2;
+    }
+    if (sNetworkApiWebSocketCount >= NETWORK_WS_MAX_CONNECTIONS) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Too many active WebSocket connections");
+        return 2;
+    }
+    if (strlen(owner->relativePath) >= SYS_MAX_PATH) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Invalid mod identity");
+        return 2;
+    }
+
+    struct NetworkWebSocket* ws = calloc(1, sizeof(*ws));
+    if (ws == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Out of memory");
+        return 2;
+    }
+    for (int i = 0; i < 4; i++) { ws->callbackRefs[i] = LUA_NOREF; }
+    if (pthread_cond_init(&ws->condition, NULL) != 0) {
+        free(ws);
+        lua_pushnil(L);
+        lua_pushstring(L, "Could not initialize WebSocket synchronization");
+        return 2;
+    }
+    ws->url = malloc(urlLength + 1);
+    if (ws->url == NULL) {
+        pthread_cond_destroy(&ws->condition);
+        free(ws);
+        lua_pushnil(L);
+        lua_pushstring(L, "Out of memory");
+        return 2;
+    }
+    memcpy(ws->url, url, urlLength);
+    ws->url[urlLength] = '\0';
+    snprintf(ws->ownerPath, sizeof(ws->ownerPath), "%s", owner->relativePath);
+
+    static const char* callbackNames[4] = { "on_open", "on_message", "on_close", "on_error" };
+    for (int i = 0; i < 4; i++) {
+        lua_getfield(L, 2, callbackNames[i]);
+        if (!lua_isnil(L, -1) && lua_type(L, -1) != LUA_TFUNCTION) {
+            lua_pop(L, 1);
+            for (int j = 0; j < 4; j++) {
+                if (ws->callbackRefs[j] != LUA_NOREF) { luaL_unref(L, LUA_REGISTRYINDEX, ws->callbackRefs[j]); }
+            }
+            network_api_ws_free(ws);
+            lua_pushnil(L);
+            lua_pushfstring(L, "callbacks.%s must be a function or nil", callbackNames[i]);
+            return 2;
+        }
+        if (lua_type(L, -1) == LUA_TFUNCTION) {
+            ws->callbackRefs[i] = luaL_ref(L, LUA_REGISTRYINDEX);
+        } else {
+            lua_pop(L, 1);
+        }
+    }
+
+    pthread_mutex_lock(&sNetworkApiMutex);
+    ws->id = sNetworkApiWebSocketNextId++;
+    if (ws->id == 0) { ws->id = sNetworkApiWebSocketNextId++; }
+    ws->next = sNetworkWebSockets;
+    sNetworkWebSockets = ws;
+    sNetworkApiWebSocketCount++;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+
+    if (pthread_create(&ws->thread, NULL, network_api_ws_worker, ws) != 0) {
+        pthread_mutex_lock(&sNetworkApiMutex);
+        sNetworkWebSockets = ws->next;
+        if (sNetworkApiWebSocketCount > 0) { sNetworkApiWebSocketCount--; }
+        pthread_mutex_unlock(&sNetworkApiMutex);
+        for (int i = 0; i < 4; i++) {
+            if (ws->callbackRefs[i] != LUA_NOREF) { luaL_unref(L, LUA_REGISTRYINDEX, ws->callbackRefs[i]); }
+        }
+        network_api_ws_free(ws);
+        lua_pushnil(L);
+        lua_pushstring(L, "Could not start WebSocket worker thread");
+        return 2;
+    }
+    ws->threadStarted = true;
+    lua_pushinteger(L, ws->id);
+    return 1;
+#endif
+}
+
+static int network_api_websocket_send(lua_State* L) {
+    if ((lua_gettop(L) != 2 && lua_gettop(L) != 3) ||
+        lua_type(L, 1) != LUA_TNUMBER || !lua_isinteger(L, 1) ||
+        lua_type(L, 2) != LUA_TSTRING) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    lua_Integer id = lua_tointeger(L, 1);
+    struct Mod* owner = gLuaActiveMod;
+    if (id <= 0 || id > UINT_MAX || owner == NULL || !owner->networkAccessAllowed) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+#ifndef _WIN32
+    lua_pushboolean(L, false);
+#else
+    size_t payloadLength = 0;
+    const char* payload = lua_tolstring(L, 2, &payloadLength);
+    bool binary = false;
+    if (lua_gettop(L) == 3) {
+        const char* kind = lua_tostring(L, 3);
+        if (kind == NULL || (strcmp(kind, "text") != 0 && strcmp(kind, "binary") != 0)) {
+            lua_pushboolean(L, false);
+            return 1;
+        }
+        binary = strcmp(kind, "binary") == 0;
+    }
+    if (payloadLength > NETWORK_WS_MAX_MESSAGE) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    struct NetworkWebSocketMessage* message = calloc(1, sizeof(*message));
+    if (message == NULL) { lua_pushboolean(L, false); return 1; }
+    if (payloadLength > 0) {
+        message->payload = malloc(payloadLength);
+        if (message->payload == NULL) { free(message); lua_pushboolean(L, false); return 1; }
+        memcpy(message->payload, payload, payloadLength);
+    }
+    message->payloadLength = payloadLength;
+    message->binary = binary;
+
+    pthread_mutex_lock(&sNetworkApiMutex);
+    struct NetworkWebSocket* ws = network_api_ws_find_locked((unsigned int)id, owner->relativePath);
+    if (ws == NULL || !ws->connected || ws->closeRequested ||
+        ws->sendCount >= 8 || payloadLength > NETWORK_WS_MAX_MESSAGE - ws->sendBytes) {
+        pthread_mutex_unlock(&sNetworkApiMutex);
+        free(message->payload);
+        free(message);
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    if (ws->sendTail == NULL) { ws->sendHead = message; }
+    else { ws->sendTail->next = message; }
+    ws->sendTail = message;
+    ws->sendCount++;
+    ws->sendBytes += payloadLength;
+    pthread_cond_signal(&ws->condition);
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    lua_pushboolean(L, true);
+#endif
+    return 1;
+}
+
+static int network_api_websocket_close(lua_State* L) {
+    if (lua_gettop(L) != 1 || lua_type(L, 1) != LUA_TNUMBER || !lua_isinteger(L, 1)) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    lua_Integer id = lua_tointeger(L, 1);
+    struct Mod* owner = gLuaActiveMod;
+    if (id <= 0 || id > UINT_MAX || owner == NULL) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+#ifndef _WIN32
+    lua_pushboolean(L, false);
+#else
+    pthread_mutex_lock(&sNetworkApiMutex);
+    struct NetworkWebSocket* ws = network_api_ws_find_locked((unsigned int)id, owner->relativePath);
+    if (ws != NULL) {
+        ws->closeRequested = true;
+        pthread_cond_broadcast(&ws->condition);
+    }
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    lua_pushboolean(L, ws != NULL);
+#endif
+    return 1;
+}
 
 static int network_api_has_permission(lua_State* L) {
     struct Mod* mod = gLuaActiveMod;
