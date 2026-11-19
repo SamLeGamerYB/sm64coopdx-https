@@ -28,6 +28,13 @@ struct LocalEnabledPath {
 
 struct LocalEnabledPath* sLocalEnabledPaths = NULL;
 
+struct LocalNetworkPermission {
+    char* relativePath;
+    struct LocalNetworkPermission* next;
+};
+
+static struct LocalNetworkPermission* sLocalNetworkPermissions = NULL;
+
 void mods_get_main_mod_name(char* destination, u32 maxSize) {
     struct Mod* picked = NULL;
     size_t pickedSize = 0;
@@ -86,6 +93,42 @@ static void mods_local_store_enabled(void) {
         }
         prev = n;
     }
+}
+
+static void mods_local_store_network_permissions(void) {
+    assert(sLocalNetworkPermissions == NULL);
+    struct LocalNetworkPermission* prev = NULL;
+    for (u16 i = 0; i < gLocalMods.entryCount; i++) {
+        struct Mod* mod = gLocalMods.entries[i];
+        if (mod == NULL || !mod->networkAccessAllowed) { continue; }
+
+        struct LocalNetworkPermission* permission = calloc(1, sizeof(struct LocalNetworkPermission));
+        permission->relativePath = sys_strdup(mod->relativePath);
+        if (prev == NULL) {
+            sLocalNetworkPermissions = permission;
+        } else {
+            prev->next = permission;
+        }
+        prev = permission;
+    }
+}
+
+static void mods_local_restore_network_permissions(void) {
+    struct LocalNetworkPermission* permission = sLocalNetworkPermissions;
+    while (permission != NULL) {
+        struct LocalNetworkPermission* next = permission->next;
+        for (u16 i = 0; i < gLocalMods.entryCount; i++) {
+            struct Mod* mod = gLocalMods.entries[i];
+            if (mod != NULL && strcmp(mod->relativePath, permission->relativePath) == 0) {
+                mod->networkAccessAllowed = true;
+                break;
+            }
+        }
+        free(permission->relativePath);
+        free(permission);
+        permission = next;
+    }
+    sLocalNetworkPermissions = NULL;
 }
 
 static void mods_local_restore_enabled(void) {
@@ -257,7 +300,10 @@ static void mods_load(struct Mods* mods, char* modsBasePath, UNUSED bool isUserM
 
 void mods_refresh_local(void) {
     LOADING_SCREEN_MUTEX(loading_screen_set_segment_text("Refreshing Mod Cache"));
-    if (gGameInited) { mods_local_store_enabled(); }
+    if (gGameInited) {
+        mods_local_store_enabled();
+        mods_local_store_network_permissions();
+    }
 
     // figure out user path
     bool hasUserPath = true;
@@ -289,7 +335,10 @@ void mods_refresh_local(void) {
         gLocalMods.size += mod->size;
     }
 
-    if (gGameInited) { mods_local_restore_enabled(); }
+    if (gGameInited) {
+        mods_local_restore_enabled();
+        mods_local_restore_network_permissions();
+    }
 }
 
 void mods_enable(char* relativePath) {
