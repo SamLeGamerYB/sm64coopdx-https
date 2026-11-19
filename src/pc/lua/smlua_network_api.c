@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -41,11 +42,16 @@ struct NetworkHttpRequest {
     struct NetworkHttpRequest* next;
 };
 
+#ifdef _WIN32
 static pthread_mutex_t sNetworkApiMutex = PTHREAD_MUTEX_INITIALIZER;
 static struct NetworkHttpRequest* sNetworkApiRequests = NULL;
 static unsigned int sNetworkApiNextId = 1;
 static unsigned int sNetworkApiRequestCount = 0;
+#else
+static unsigned int sNetworkApiRequestCount = 0;
+#endif
 
+#ifdef _WIN32
 static bool network_api_has_https_prefix(const char* url) {
     static const char prefix[] = "https://";
     if (strlen(url) < sizeof(prefix) - 1) { return false; }
@@ -79,6 +85,8 @@ static struct Mod* network_api_find_active_mod(const char* relativePath) {
     }
     return NULL;
 }
+
+#endif
 
 #ifdef _WIN32
 static wchar_t* network_api_utf8_to_wide(const char* value) {
