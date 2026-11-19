@@ -1232,6 +1232,12 @@ void smlua_network_api_bind(lua_State* L) {
     lua_setfield(L, -2, "cancel_request");
     lua_pushcfunction(L, network_api_https_request);
     lua_setfield(L, -2, "https_request");
+    lua_pushcfunction(L, network_api_websocket_connect);
+    lua_setfield(L, -2, "websocket_connect");
+    lua_pushcfunction(L, network_api_websocket_send);
+    lua_setfield(L, -2, "websocket_send");
+    lua_pushcfunction(L, network_api_websocket_close);
+    lua_setfield(L, -2, "websocket_close");
     lua_setglobal(L, "network");
 }
 
@@ -1248,6 +1254,85 @@ void smlua_network_api_discard_mod_requests(const char* relativePath) {
 #else
     UNUSED relativePath;
 #endif
+}
+
+
+static void network_api_ws_update(lua_State* L) {
+    unsigned int processed = 0;
+    while (processed < 32) {
+        struct NetworkWebSocket* ws = NULL;
+        struct NetworkWebSocketEvent* event = NULL;
+        bool finished = false;
+        bool callbacksSuppressed = false;
+
+        pthread_mutex_lock(&sNetworkApiMutex);
+        struct NetworkWebSocket** link = &sNetworkWebSockets;
+        while (*link != NULL) {
+            if ((*link)->eventHead != NULL) {
+                ws = *link;
+                event = ws->eventHead;
+                ws->eventHead = event->next;
+                if (ws->eventHead == NULL) { ws->eventTail = NULL; }
+                if (ws->eventCount > 0) { ws->eventCount--; }
+                if (ws->eventBytes >= event->payloadLength) { ws->eventBytes -= event->payloadLength; }
+                callbacksSuppressed = ws->callbacksSuppressed;
+                break;
+            }
+            if ((*link)->complete) {
+                ws = *link;
+                *link = ws->next;
+                ws->next = NULL;
+                finished = true;
+                if (sNetworkApiWebSocketCount > 0) { sNetworkApiWebSocketCount--; }
+                break;
+            }
+            link = &(*link)->next;
+        }
+        pthread_mutex_unlock(&sNetworkApiMutex);
+
+        if (ws == NULL) { break; }
+        if (finished) {
+            if (ws->threadStarted) { pthread_join(ws->thread, NULL); }
+            for (int i = 0; i < 4; i++) {
+                if (ws->callbackRefs[i] != LUA_NOREF) {
+                    luaL_unref(L, LUA_REGISTRYINDEX, ws->callbackRefs[i]);
+                }
+            }
+            network_api_ws_free(ws);
+            continue;
+        }
+
+        processed++;
+        if (!callbacksSuppressed && L != NULL) {
+            struct Mod* owner = network_api_find_active_mod(ws->ownerPath);
+            if (owner != NULL && owner->networkAccessAllowed) {
+                int callbackIndex = (int)event->type;
+                int callbackRef = ws->callbackRefs[callbackIndex];
+                if (callbackRef != LUA_NOREF) {
+                    int previousTop = lua_gettop(L);
+                    lua_rawgeti(L, LUA_REGISTRYINDEX, callbackRef);
+                    lua_pushinteger(L, ws->id);
+                    int argumentCount = 1;
+                    if (event->type == NETWORK_WS_EVENT_MESSAGE) {
+                        lua_pushlstring(L, event->payload != NULL ? event->payload : "",
+                                        event->payloadLength);
+                        lua_pushboolean(L, event->binary);
+                        argumentCount = 3;
+                    } else if (event->type == NETWORK_WS_EVENT_ERROR) {
+                        lua_pushlstring(L, event->payload != NULL ? event->payload : "",
+                                        event->payloadLength);
+                        argumentCount = 2;
+                    }
+                    if (smlua_call_hook(L, argumentCount, 0, 0, owner, NULL) != LUA_OK) {
+                        LOG_LUA("Failed to call network WebSocket callback");
+                    }
+                    lua_settop(L, previousTop);
+                }
+            }
+        }
+        free(event->payload);
+        free(event);
+    }
 }
 
 void smlua_network_api_update(lua_State* L) {
@@ -1297,6 +1382,7 @@ void smlua_network_api_update(lua_State* L) {
         luaL_unref(L, LUA_REGISTRYINDEX, completed->callbackRef);
         network_api_free_request(completed);
     }
+    network_api_ws_update(L);
 #else
     UNUSED L;
 #endif
