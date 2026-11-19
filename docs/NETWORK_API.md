@@ -60,7 +60,7 @@ The function validates the active mod's permission before creating a worker or p
 | Response body | 1 MiB |
 | Response reading deadline | 30 seconds |
 
-Only `https://` URLs are accepted. WinHTTP redirects are disabled; if the redirect policy cannot be enforced, the request fails. TLS certificate verification remains enabled by WinHTTP defaults. No response is written to disk.
+Only `https://` URLs are accepted. WinHTTP redirects, automatic cookies, and ambient authentication are disabled; if this policy cannot be enforced, the request fails. TLS certificate verification remains enabled by WinHTTP defaults. Mods can still provide explicit headers such as `Authorization`. No response is written to disk.
 
 ## WebSockets (planned)
 
