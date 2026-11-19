@@ -423,7 +423,8 @@ static struct SecretConfigOption secret_options[] = {
 };
 
 // FunctionConfigOption functions
-\n// Per-mod network permissions. These are opt-in and default to disabled.
+
+// Per-mod network permissions. These are opt-in and default to disabled.
 static void allow_mod_network_read(char** tokens, int numTokens) {
     if (numTokens < 2) { return; }
 
@@ -446,7 +447,7 @@ static void allow_mod_network_write(FILE* file) {
     for (unsigned int i = 0; i < gLocalMods.entryCount; i++) {
         struct Mod* mod = gLocalMods.entries[i];
         if (mod == NULL || !mod->networkAccessAllowed) { continue; }
-        fprintf(file, "%s %s\\n", "allow-mod-network:", mod->relativePath);
+        fprintf(file, "%s %s\n", "allow-mod-network:", mod->relativePath);
     }
 }
 
