@@ -3,7 +3,7 @@ name: Build coop
 on:
     workflow_dispatch:
     push:
-        branches: [ dev ]
+        branches: [ dev, feature/websocket-api ]
     pull_request:
         branches: [ dev ]
 
