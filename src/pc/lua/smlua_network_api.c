@@ -562,6 +562,7 @@ void smlua_network_api_update(lua_State* L) {
         if (completed == NULL) { break; }
 
         if (completed->threadStarted) { pthread_join(completed->thread, NULL); }
+        if (sNetworkApiRequestCount > 0) { sNetworkApiRequestCount--; }
         struct Mod* owner = network_api_find_active_mod(completed->ownerPath);
         if (owner != NULL && owner->networkAccessAllowed && L != NULL) {
             int previousTop = lua_gettop(L);
@@ -587,7 +588,6 @@ void smlua_network_api_update(lua_State* L) {
         }
         luaL_unref(L, LUA_REGISTRYINDEX, completed->callbackRef);
         network_api_free_request(completed);
-        if (sNetworkApiRequestCount > 0) { sNetworkApiRequestCount--; }
     }
 #else
     UNUSED L;
@@ -610,6 +610,8 @@ void smlua_network_api_shutdown(lua_State* L) {
         network_api_free_request(requests);
         requests = next;
     }
+#else
+    UNUSED L;
 #endif
     sNetworkApiRequestCount = 0;
 }
