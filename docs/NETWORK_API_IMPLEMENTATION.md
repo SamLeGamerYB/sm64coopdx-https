@@ -29,7 +29,7 @@ This file records repository-specific integration constraints and the current im
 - At most 8 completed HTTPS callbacks are dispatched per game update, matching the maximum number of concurrent requests.
 - Workers never call Lua. Completed requests are checked and dispatched from `smlua_update()` through `smlua_call_hook()`.
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
-- When a mod file is hot-reloaded or the user revokes its network permission, its active WinHTTP request handles are closed and pending callbacks are discarded.
+- When a mod file is hot-reloaded or the user revokes its network permission, its pending requests are marked cancelled and callbacks are discarded. The worker checks the flag between synchronous WinHTTP operations; it never closes a handle while another thread is using it.
 - HTTPS is restricted to `https://`; WinHTTP redirects, automatic cookies, and ambient authentication are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
 - The transport is linked with WinHTTP on Windows. Other platforms currently return an explicit unsupported error.
 - WebSockets and non-Windows transport backends are not implemented yet.
