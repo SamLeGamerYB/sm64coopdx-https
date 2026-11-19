@@ -22,6 +22,8 @@
 #define NETWORK_API_MAX_HEADERS 16384
 #define NETWORK_API_MAX_BODY (1024 * 1024)
 #define NETWORK_API_TIMEOUT_MS 15000
+#define NETWORK_WS_MAX_MESSAGE (1024 * 1024)
+#define NETWORK_WS_MAX_CONNECTIONS 4
 
 struct NetworkHttpRequest {
     pthread_t thread;
@@ -44,11 +46,60 @@ struct NetworkHttpRequest {
     struct NetworkHttpRequest* next;
 };
 
+enum NetworkWebSocketEventType {
+    NETWORK_WS_EVENT_OPEN,
+    NETWORK_WS_EVENT_MESSAGE,
+    NETWORK_WS_EVENT_CLOSE,
+    NETWORK_WS_EVENT_ERROR,
+};
+
+struct NetworkWebSocketEvent {
+    enum NetworkWebSocketEventType type;
+    char* payload;
+    size_t payloadLength;
+    bool binary;
+    struct NetworkWebSocketEvent* next;
+};
+
+struct NetworkWebSocketMessage {
+    char* payload;
+    size_t payloadLength;
+    bool binary;
+    struct NetworkWebSocketMessage* next;
+};
+
+struct NetworkWebSocket {
+    pthread_t thread;
+    pthread_t receiveThread;
+    pthread_t sendThread;
+    bool threadStarted;
+    bool receiveThreadStarted;
+    bool sendThreadStarted;
+    bool complete;
+    bool connected;
+    bool closeRequested;
+    bool callbacksSuppressed;
+    unsigned int id;
+    int callbackRefs[4];
+    char ownerPath[SYS_MAX_PATH];
+    char* url;
+    HINTERNET socket;
+    pthread_cond_t condition;
+    struct NetworkWebSocketMessage* sendHead;
+    struct NetworkWebSocketMessage* sendTail;
+    struct NetworkWebSocketEvent* eventHead;
+    struct NetworkWebSocketEvent* eventTail;
+    struct NetworkWebSocket* next;
+};
+
 #ifdef _WIN32
 static pthread_mutex_t sNetworkApiMutex = PTHREAD_MUTEX_INITIALIZER;
 static struct NetworkHttpRequest* sNetworkApiRequests = NULL;
 static unsigned int sNetworkApiNextId = 1;
 static unsigned int sNetworkApiRequestCount = 0;
+static struct NetworkWebSocket* sNetworkWebSockets = NULL;
+static unsigned int sNetworkWebSocketCount = 0;
+static unsigned int sNetworkWebSocketNextId = 1;
 #else
 static unsigned int sNetworkApiRequestCount = 0;
 #endif
