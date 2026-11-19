@@ -27,6 +27,9 @@ struct NetworkHttpRequest {
     bool threadStarted;
     bool complete;
     bool cancelled;
+#ifdef _WIN32
+    HINTERNET httpRequest;
+#endif
     unsigned int id;
     int callbackRef;
     char ownerPath[SYS_MAX_PATH];
@@ -148,6 +151,7 @@ static void* network_api_http_worker(void* argument) {
     wchar_t* wideHeaders = NULL;
     wchar_t* host = NULL;
     wchar_t* path = NULL;
+    bool requestHandleRegistered = false;
 
     wideUrl = network_api_utf8_to_wide(request->url);
     wideMethod = network_api_utf8_to_wide(request->method);
@@ -212,6 +216,16 @@ static void* network_api_http_worker(void* argument) {
         network_api_set_error(request, "Could not create HTTPS request");
         goto cleanup;
     }
+
+    pthread_mutex_lock(&sNetworkApiMutex);
+    if (request->cancelled) {
+        pthread_mutex_unlock(&sNetworkApiMutex);
+        network_api_set_error(request, "HTTPS request was cancelled");
+        goto cleanup;
+    }
+    request->httpRequest = httpRequest;
+    requestHandleRegistered = true;
+    pthread_mutex_unlock(&sNetworkApiMutex);
 
     // Disable redirects entirely so a secure request can never be redirected to plaintext HTTP.
     DWORD disableRedirects = WINHTTP_DISABLE_REDIRECTS;
@@ -298,7 +312,18 @@ static void* network_api_http_worker(void* argument) {
     }
 
 cleanup:
-    if (httpRequest != NULL) { WinHttpCloseHandle(httpRequest); }
+    if (httpRequest != NULL) {
+        bool closeRequestHandle = !requestHandleRegistered;
+        if (requestHandleRegistered) {
+            pthread_mutex_lock(&sNetworkApiMutex);
+            if (request->httpRequest == httpRequest) {
+                request->httpRequest = NULL;
+                closeRequestHandle = true;
+            }
+            pthread_mutex_unlock(&sNetworkApiMutex);
+        }
+        if (closeRequestHandle) { WinHttpCloseHandle(httpRequest); }
+    }
     if (connection != NULL) { WinHttpCloseHandle(connection); }
     if (session != NULL) { WinHttpCloseHandle(session); }
     free(wideUrl);
@@ -323,6 +348,41 @@ static int network_api_has_permission(lua_State* L) {
 static int network_api_is_supported(lua_State* L) {
 #ifdef _WIN32
     lua_pushboolean(L, true);
+#else
+    lua_pushboolean(L, false);
+#endif
+    return 1;
+}
+
+static int network_api_cancel_request(lua_State* L) {
+    if (lua_gettop(L) != 1 || lua_type(L, 1) != LUA_TNUMBER) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+
+    lua_Integer requestId = lua_tointeger(L, 1);
+    struct Mod* owner = gLuaActiveMod;
+    if (requestId <= 0 || owner == NULL) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+
+#ifdef _WIN32
+    HINTERNET handleToClose = NULL;
+    bool found = false;
+    pthread_mutex_lock(&sNetworkApiMutex);
+    for (struct NetworkHttpRequest* request = sNetworkApiRequests; request != NULL; request = request->next) {
+        if (request->id == (unsigned int)requestId && strcmp(request->ownerPath, owner->relativePath) == 0) {
+            request->cancelled = true;
+            handleToClose = request->httpRequest;
+            request->httpRequest = NULL;
+            found = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    if (handleToClose != NULL) { WinHttpCloseHandle(handleToClose); }
+    lua_pushboolean(L, found);
 #else
     lua_pushboolean(L, false);
 #endif
@@ -551,6 +611,8 @@ void smlua_network_api_bind(lua_State* L) {
     lua_setfield(L, -2, "has_permission");
     lua_pushcfunction(L, network_api_is_supported);
     lua_setfield(L, -2, "is_supported");
+    lua_pushcfunction(L, network_api_cancel_request);
+    lua_setfield(L, -2, "cancel_request");
     lua_pushcfunction(L, network_api_https_request);
     lua_setfield(L, -2, "https_request");
     lua_setglobal(L, "network");
