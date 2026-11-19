@@ -64,7 +64,7 @@ Only `https://` URLs are accepted. WinHTTP redirects, automatic cookies, and amb
 
 ## WebSockets
 
-Windows builds accept only `wss://` URLs. The connection is asynchronous and returns a numeric socket ID immediately. Callback functions are optional:
+Windows 8 or newer builds accept only `wss://` URLs. The connection is asynchronous and returns a numeric socket ID immediately. Callback functions are optional:
 
 ```lua
 local socketId, err = network.websocket_connect("wss://example.invalid/socket", {
@@ -103,7 +103,7 @@ end
 - `on_error(id, message)` reports transport errors.
 - `on_close(id)` runs when an established connection ends.
 - The optional third argument is a headers table for explicit handshake headers (for example, `Authorization`). Header names and values are validated and the total is limited to 16 KiB.
-- WinHTTP uses a 15-second WebSocket keep-alive interval and a bounded 60-second receive timeout.
+- WinHTTP uses a 15-second WebSocket keep-alive interval, a 60-second receive timeout, and a 5-second close-handshake timeout.
 - `websocket_send` and `websocket_close` return booleans. A send returning true means it was queued, not necessarily delivered.
 - A mod may only send to or close socket IDs it created itself.
 
