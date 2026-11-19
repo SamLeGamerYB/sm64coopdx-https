@@ -293,6 +293,7 @@ static void* network_api_http_worker(void* argument) {
     }
 
     connection = WinHttpConnect(session, host, components.nPort, 0);
+    if (network_api_ws_is_closing(ws)) { goto cleanup; }
     if (connection == NULL) {
         network_api_set_error(request, "HTTPS connection failed");
         goto cleanup;
@@ -477,6 +478,13 @@ static void network_api_ws_set_error(struct NetworkWebSocket* ws, const char* me
     network_api_ws_queue_event(ws, NETWORK_WS_EVENT_ERROR, message, strlen(message), false);
 }
 
+static bool network_api_ws_is_closing(struct NetworkWebSocket* ws) {
+    pthread_mutex_lock(&sNetworkApiMutex);
+    bool closing = ws->closeRequested || ws->callbacksSuppressed;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    return closing;
+}
+
 static void network_api_ws_free_messages(struct NetworkWebSocket* ws) {
     struct NetworkWebSocketMessage* message = ws->sendHead;
     while (message != NULL) {
@@ -624,6 +632,7 @@ static void* network_api_ws_worker(void* argument) {
         wideUrl = network_api_utf8_to_wide(httpsUrl);
     }
     free(httpsUrl);
+    if (network_api_ws_is_closing(ws)) { goto cleanup; }
     if (wideUrl == NULL) {
         network_api_ws_set_error(ws, "Invalid UTF-8 in WebSocket URL");
         goto cleanup;
@@ -692,6 +701,7 @@ static void* network_api_ws_worker(void* argument) {
         network_api_ws_set_error(ws, "Could not enforce secure WebSocket policy");
         goto cleanup;
     }
+    if (network_api_ws_is_closing(ws)) { goto cleanup; }
     if (!WinHttpSetOption(request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, NULL, 0) ||
         !WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                             WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
