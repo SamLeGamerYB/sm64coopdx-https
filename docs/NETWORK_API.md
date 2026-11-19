@@ -11,11 +11,47 @@ This document defines the first version of the native networking API exposed to 
 - Response and message payloads are kept in memory. This API does not provide a file-download or file-writing facility.
 - The initial implementation target is Windows.
 
-## Lua surface (proposed)
+## Lua surface
 
-The API is exposed as a `network` table. The exact names and callback payloads below are the contract to implement; they are not available until the native implementation lands.
+The API is exposed as a `network` table. The HTTPS functions below are implemented in the current feature branch; WebSockets remain planned and are not exposed yet.
 
-### WebSocket
+### Permission and capability checks
+
+```lua
+local allowed = network.has_permission()
+local supported = network.is_supported()
+```
+
+`has_permission()` reports the active mod's explicit user-granted network permission. `is_supported()` reports whether the current build includes a native transport (currently Windows only).
+
+### HTTPS requests
+
+```lua
+local requestId, err = network.https_request({
+    url = "https://example.invalid/api",
+    method = "POST", -- defaults to GET
+    headers = {
+        ["Content-Type"] = "application/json",
+        ["Authorization"] = "Bearer ...",
+    },
+    body = "{\\"hello\\":true}", -- optional; Lua strings may also contain binary data
+}, function(status, headers, body, errorMessage)
+    -- status is the HTTP status code, or nil if the request failed
+    -- headers is the raw response header block
+    -- body is the in-memory response body
+    -- errorMessage is nil on success, otherwise an error string
+end)
+
+if requestId == nil then
+    print(err)
+end
+```
+
+Requests are asynchronous. The callback runs on the game thread. The return value is an opaque numeric request ID; cancellation is not exposed yet.
+
+### WebSocket (planned)
+
+
 
 ```lua
 local socket = network.websocket_connect("wss://example.invalid/socket", {
@@ -57,12 +93,12 @@ The response object will expose the HTTP status, response headers, and an in-mem
 - WebSocket URLs must use `wss://`; plain `ws://` is rejected.
 - HTTPS URLs must use `https://`; redirects must not downgrade to HTTP.
 - Request methods and headers are caller-controlled, subject to validation and bounded sizes.
-- Message and response sizes are bounded. The default limit should be conservative and configurable through a documented API/configuration point; changing the limit must not permit unbounded allocation.
+- The current HTTPS implementation caps request and response bodies at 1 MiB, headers at 16 KiB, active requests at 8, and response reading at 30 seconds. These initial limits are fixed in the native implementation.
 - Queues between worker threads and the game thread are bounded. Overflow must fail safely and be observable, never silently corrupt memory.
 - No Lua API, callback, registry reference, or Lua state may be accessed from a worker thread.
 - Each operation is owned by the mod that created it. The owner is tracked by a stable mod identity, not by retaining a raw `Mod*` across reloads.
 - When a mod is disabled, reloaded, or the Lua state shuts down, its operations are cancelled and their callbacks are discarded. Native resources and worker threads must be fully cleaned up before the Lua state is destroyed.
-- Callback execution must re-check that the owner mod and Lua state are still valid.
+- Callback execution re-checks that the owner mod still exists in the active mod list and retains network permission.
 
 ## Threading model
 
@@ -76,7 +112,7 @@ A blocking network call or an unbounded wait on the game thread is not acceptabl
 
 ## Implementation notes
 
-- On Windows, WinHTTP is the intended HTTPS/WebSocket transport because it supports TLS and the WebSocket upgrade APIs.
+- The current Windows HTTPS transport uses WinHTTP. WebSocket transport is still to be implemented.
 - WebSocket sends must preserve message type (text vs binary) and message boundaries.
 - Receive fragments must be reassembled into complete messages while enforcing the configured maximum message size.
 - HTTPS response bodies are accumulated in memory under the same bounded-resource policy.
