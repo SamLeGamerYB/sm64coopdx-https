@@ -524,8 +524,10 @@ static void* network_api_ws_send_worker(void* argument) {
             continue;
         }
         if (closeRequested) {
-            WinHttpWebSocketClose(ws->socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS,
-                                  NULL, 0);
+            // Shutdown closes only the send side; the receive worker can finish
+            // the peer's close handshake without concurrent full-close calls.
+            WinHttpWebSocketShutdown(ws->socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS,
+                                     NULL, 0);
             break;
         }
     }
@@ -666,7 +668,10 @@ static void* network_api_ws_worker(void* argument) {
         network_api_ws_set_error(ws, "Could not initialize WinHTTP");
         goto cleanup;
     }
-    WinHttpSetTimeouts(session, 5000, 5000, NETWORK_API_TIMEOUT_MS, NETWORK_API_TIMEOUT_MS);
+    if (!WinHttpSetTimeouts(session, 10000, 5000, NETWORK_API_TIMEOUT_MS, 60000)) {
+        network_api_ws_set_error(ws, "Could not configure WebSocket timeouts");
+        goto cleanup;
+    }
     connection = WinHttpConnect(session, host, components.nPort, 0);
     if (connection == NULL) {
         network_api_ws_set_error(ws, "WebSocket connection failed");
@@ -701,6 +706,13 @@ static void* network_api_ws_worker(void* argument) {
     }
     WinHttpCloseHandle(request);
     request = NULL;
+
+    DWORD closeTimeout = 5000;
+    DWORD keepAliveInterval = 15000;
+    WinHttpSetOption(socket, WINHTTP_OPTION_WEB_SOCKET_CLOSE_TIMEOUT,
+                     &closeTimeout, sizeof(closeTimeout));
+    WinHttpSetOption(socket, WINHTTP_OPTION_WEB_SOCKET_KEEPALIVE_INTERVAL,
+                     &keepAliveInterval, sizeof(keepAliveInterval));
 
     pthread_mutex_lock(&sNetworkApiMutex);
     ws->socket = socket;
@@ -737,6 +749,8 @@ static void* network_api_ws_worker(void* argument) {
     }
     if (ws->sendThreadStarted) { pthread_join(ws->sendThread, NULL); }
     if (ws->receiveThreadStarted) { pthread_join(ws->receiveThread, NULL); }
+    // Both send and receive workers have stopped, so it is now safe to fully close.
+    WinHttpWebSocketClose(socket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, NULL, 0);
     network_api_ws_free_messages(ws);
     network_api_ws_queue_event(ws, NETWORK_WS_EVENT_CLOSE, NULL, 0, false);
 
