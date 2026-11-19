@@ -445,6 +445,24 @@ static bool network_api_has_wss_prefix(const char* url) {
     return true;
 }
 
+static bool network_api_ws_reserved_header(const char* name) {
+    static const char* reserved[] = {
+        "host", "connection", "upgrade", "sec-websocket-key",
+        "sec-websocket-version", "sec-websocket-extensions"
+    };
+    for (size_t i = 0; i < sizeof(reserved) / sizeof(reserved[0]); i++) {
+        const char* a = name;
+        const char* b = reserved[i];
+        while (*a != '\0' && *b != '\0' &&
+               tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+            a++;
+            b++;
+        }
+        if (*a == '\0' && *b == '\0') { return true; }
+    }
+    return false;
+}
+
 static void network_api_ws_queue_event(struct NetworkWebSocket* ws,
                                        enum NetworkWebSocketEventType type,
                                        const char* payload, size_t payloadLength,
@@ -924,6 +942,7 @@ static int network_api_websocket_connect(lua_State* L) {
             const char* name = lua_tolstring(L, -2, &nameLength);
             const char* value = lua_tolstring(L, -1, &valueLength);
             if (!network_api_valid_token(name) ||
+                network_api_ws_reserved_header(name) ||
                 memchr(name, '\0', nameLength) != NULL ||
                 memchr(value, '\0', valueLength) != NULL ||
                 !network_api_valid_header_value(value)) {
