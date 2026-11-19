@@ -755,12 +755,14 @@ static void network_api_ws_free(struct NetworkWebSocket* ws) {
 #endif
 
 
+#ifdef _WIN32
 static struct NetworkWebSocket* network_api_ws_find_locked(unsigned int id, const char* ownerPath) {
     for (struct NetworkWebSocket* ws = sNetworkWebSockets; ws != NULL; ws = ws->next) {
         if (ws->id == id && strcmp(ws->ownerPath, ownerPath) == 0) { return ws; }
     }
     return NULL;
 }
+#endif
 
 static int network_api_websocket_connect(lua_State* L) {
     if (lua_gettop(L) != 2 || lua_type(L, 1) != LUA_TSTRING || lua_type(L, 2) != LUA_TTABLE) {
@@ -1250,6 +1252,13 @@ void smlua_network_api_discard_mod_requests(const char* relativePath) {
             request->cancelled = true;
         }
     }
+    for (struct NetworkWebSocket* ws = sNetworkWebSockets; ws != NULL; ws = ws->next) {
+        if (strcmp(ws->ownerPath, relativePath) == 0) {
+            ws->callbacksSuppressed = true;
+            ws->closeRequested = true;
+            pthread_cond_broadcast(&ws->condition);
+        }
+    }
     pthread_mutex_unlock(&sNetworkApiMutex);
 #else
     UNUSED relativePath;
@@ -1257,6 +1266,7 @@ void smlua_network_api_discard_mod_requests(const char* relativePath) {
 }
 
 
+#ifdef _WIN32
 static void network_api_ws_update(lua_State* L) {
     unsigned int processed = 0;
     while (processed < 32) {
@@ -1334,6 +1344,7 @@ static void network_api_ws_update(lua_State* L) {
         free(event);
     }
 }
+#endif
 
 void smlua_network_api_update(lua_State* L) {
 #ifdef _WIN32
