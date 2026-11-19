@@ -26,6 +26,7 @@ struct NetworkHttpRequest {
     pthread_t thread;
     bool threadStarted;
     bool complete;
+    bool cancelled;
     unsigned int id;
     int callbackRef;
     char ownerPath[SYS_MAX_PATH];
@@ -555,6 +556,21 @@ void smlua_network_api_bind(lua_State* L) {
     lua_setglobal(L, "network");
 }
 
+void smlua_network_api_discard_mod_requests(const char* relativePath) {
+#ifdef _WIN32
+    if (relativePath == NULL) { return; }
+    pthread_mutex_lock(&sNetworkApiMutex);
+    for (struct NetworkHttpRequest* request = sNetworkApiRequests; request != NULL; request = request->next) {
+        if (strcmp(request->ownerPath, relativePath) == 0) {
+            request->cancelled = true;
+        }
+    }
+    pthread_mutex_unlock(&sNetworkApiMutex);
+#else
+    UNUSED relativePath;
+#endif
+}
+
 void smlua_network_api_update(lua_State* L) {
 #ifdef _WIN32
     for (;;) {
@@ -575,7 +591,7 @@ void smlua_network_api_update(lua_State* L) {
         if (completed->threadStarted) { pthread_join(completed->thread, NULL); }
         if (sNetworkApiRequestCount > 0) { sNetworkApiRequestCount--; }
         struct Mod* owner = network_api_find_active_mod(completed->ownerPath);
-        if (owner != NULL && owner->networkAccessAllowed && L != NULL) {
+        if (!completed->cancelled && owner != NULL && owner->networkAccessAllowed && L != NULL) {
             int previousTop = lua_gettop(L);
             lua_rawgeti(L, LUA_REGISTRYINDEX, completed->callbackRef);
             if (completed->statusCode > 0) {
