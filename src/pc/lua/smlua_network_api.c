@@ -182,10 +182,14 @@ static void* network_api_http_worker(void* argument) {
     components.dwStructSize = sizeof(components);
     components.dwSchemeLength = (DWORD)-1;
     components.dwHostNameLength = (DWORD)-1;
+    components.dwUserNameLength = (DWORD)-1;
+    components.dwPasswordLength = (DWORD)-1;
     components.dwUrlPathLength = (DWORD)-1;
     components.dwExtraInfoLength = (DWORD)-1;
-    if (!WinHttpCrackUrl(wideUrl, 0, 0, &components) || components.nScheme != INTERNET_SCHEME_HTTPS) {
-        network_api_set_error(request, "Invalid HTTPS URL");
+    if (!WinHttpCrackUrl(wideUrl, 0, 0, &components) ||
+        components.nScheme != INTERNET_SCHEME_HTTPS ||
+        components.dwUserNameLength > 0 || components.dwPasswordLength > 0) {
+        network_api_set_error(request, "Invalid HTTPS URL (credentials in URLs are not accepted)");
         goto cleanup;
     }
 
