@@ -24,15 +24,16 @@ This file records repository-specific integration constraints and the current im
 ## Current native implementation status
 
 - A Windows-only asynchronous HTTPS transport now exists in `src/pc/lua/smlua_network_api.c`, using WinHTTP on worker threads.
-- Lua surface: `network.has_permission()`, `network.is_supported()`, `network.https_request(options, callback)`, and owner-only `network.cancel_request(requestId)`.
+- Lua surface: `network.has_permission()`, `network.is_supported()`, `network.https_request(options, callback)`, owner-only `network.cancel_request(requestId)`, and `network.websocket_connect(url, callbacks)`, `network.websocket_send(id, payload, kind)`, `network.websocket_close(id)`.
 - The HTTPS request accepts a caller-selected method, headers, and optional body. The callback receives `statusCode, rawResponseHeaders, responseBody, errorMessage`.
 - At most 8 completed HTTPS callbacks are dispatched per game update, matching the maximum number of concurrent requests.
 - Workers never call Lua. Completed requests are checked and dispatched from `smlua_update()` through `smlua_call_hook()`.
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
-- When a mod file is hot-reloaded or the user revokes its network permission, its pending requests are marked cancelled and callbacks are discarded. The worker checks the flag between synchronous WinHTTP operations; it never closes a handle while another thread is using it.
+- When a mod file is hot-reloaded or the user revokes its network permission, its pending HTTP requests are marked cancelled, its WebSockets are asked to close, and callbacks are discarded. The worker checks the flag between synchronous WinHTTP operations; it never closes a handle while another thread is using it.
 - HTTPS is restricted to `https://`; WinHTTP redirects, automatic cookies, and ambient authentication are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
 - The transport is linked with WinHTTP on Windows. Other platforms currently return an explicit unsupported error.
-- WebSockets and non-Windows transport backends are not implemented yet.
+- A Windows-only WSS backend now performs the upgrade handshake, receives fragmented text/binary messages, queues outgoing text/binary messages, and dispatches `on_open`, `on_message`, `on_close`, and `on_error` callbacks on the game thread. It has not been build-tested.
+- Non-Windows transport backends are not implemented yet.
 - No build or runtime tests have been executed in this environment. Do not describe this implementation as verified until CI/build tests pass.
 
 ## Required implementation invariants
@@ -40,7 +41,7 @@ This file records repository-specific integration constraints and the current im
 1. No network worker may call Lua or access the Lua registry.
 2. Completion callbacks are dispatched only on the game thread.
 3. Every operation is associated with a stable mod identity and is discarded if that mod is no longer active.
-4. Shutdown must prevent new work, close active WinHTTP request handles, join workers, clear pending completions and release callback references before Lua is closed.
+4. Shutdown prevents new work, marks HTTP requests cancelled, asks WebSockets to close, joins workers, clears pending events and releases callback references before Lua is closed.
 5. All queues, request bodies, response bodies, headers, and WebSocket messages need explicit size limits.
 6. Only `https://` and `wss://` are accepted. Redirects must not downgrade to plaintext.
 7. The API must not expose a file-writing/download primitive; payloads are delivered in memory.
