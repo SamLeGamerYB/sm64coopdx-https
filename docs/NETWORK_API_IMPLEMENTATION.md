@@ -28,9 +28,10 @@ This file records repository-specific integration constraints and the current im
 - The HTTPS request accepts a caller-selected method, headers, and optional body. The callback receives `statusCode, rawResponseHeaders, responseBody, errorMessage`.
 - Workers never call Lua. Completed requests are checked and dispatched from `smlua_update()` through `smlua_call_hook()`.
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
+- When a mod file is hot-reloaded, pending callbacks owned by that mod are marked stale and discarded on completion. The current WinHTTP request itself is not interrupted.
 - HTTPS is restricted to `https://`; WinHTTP redirects are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
 - The transport is linked with WinHTTP on Windows. Other platforms currently return an explicit unsupported error.
-- WebSockets, cancellation handles, and non-Windows transport backends are not implemented yet.
+- WebSockets, explicit request cancellation handles, and non-Windows transport backends are not implemented yet.
 - No build or runtime tests have been executed in this environment. Do not describe this implementation as verified until CI/build tests pass.
 
 ## Required implementation invariants
