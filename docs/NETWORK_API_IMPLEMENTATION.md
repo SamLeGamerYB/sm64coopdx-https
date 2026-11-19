@@ -24,12 +24,12 @@ This file records repository-specific integration constraints and the current im
 ## Current native implementation status
 
 - A Windows-only asynchronous HTTPS transport now exists in `src/pc/lua/smlua_network_api.c`, using WinHTTP on worker threads.
-- Lua surface: `network.has_permission()`, `network.is_supported()`, and `network.https_request(options, callback)`.
+- Lua surface: `network.has_permission()`, `network.is_supported()`, `network.https_request(options, callback)`, and owner-only `network.cancel_request(requestId)`.
 - The HTTPS request accepts a caller-selected method, headers, and optional body. The callback receives `statusCode, rawResponseHeaders, responseBody, errorMessage`.
 - At most 8 completed HTTPS callbacks are dispatched per game update, matching the maximum number of concurrent requests.
 - Workers never call Lua. Completed requests are checked and dispatched from `smlua_update()` through `smlua_call_hook()`.
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
-- When a mod file is hot-reloaded, its active WinHTTP request handles are closed and pending callbacks are discarded.
+- When a mod file is hot-reloaded or the user revokes its network permission, its active WinHTTP request handles are closed and pending callbacks are discarded.
 - HTTPS is restricted to `https://`; WinHTTP redirects are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
 - The transport is linked with WinHTTP on Windows. Other platforms currently return an explicit unsupported error.
 - WebSockets and non-Windows transport backends are not implemented yet.
