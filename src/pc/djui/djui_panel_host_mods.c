@@ -81,6 +81,11 @@ static void djui_panel_host_mods_description_create(void) {
     sDescriptionPanel = panel;
 }
 
+static void djui_mod_network_checkbox_on_value_change(UNUSED struct DjuiBase* base) {
+    // Save immediately so a user's explicit permission choice survives a restart.
+    configfile_save(configfile_name());
+}
+
 static void djui_mod_checkbox_on_hover(struct DjuiBase* base) {
     char* description = "";
     if (base->tag >= 0 && base->tag < gLocalMods.entryCount) {
@@ -177,6 +182,11 @@ void djui_panel_host_mods_add_mods(struct DjuiBase* layoutBase) {
         checkbox->base.tag = i;
         djui_base_set_enabled(&checkbox->base, mod->selectable);
         djui_interactable_hook_hover(&checkbox->base, djui_mod_checkbox_on_hover, djui_mod_checkbox_on_hover_end);
+
+        struct DjuiCheckbox* networkCheckbox = djui_checkbox_create(layoutBase, "Allow network access", &mod->networkAccessAllowed, djui_mod_network_checkbox_on_value_change);
+        networkCheckbox->base.tag = i;
+        djui_base_set_enabled(&networkCheckbox->base, mod->selectable);
+        djui_interactable_hook_hover(&networkCheckbox->base, djui_mod_checkbox_on_hover, djui_mod_checkbox_on_hover_end);
         foundAny = true;
     }
     if (!foundAny) {
