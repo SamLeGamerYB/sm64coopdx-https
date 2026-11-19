@@ -84,6 +84,7 @@ These functions are design examples only and are not available in the current bu
 - Completion callbacks are dispatched from `smlua_update()` on the game thread.
 - Each request stores a copied mod `relativePath`, not a `struct Mod*`.
 - Callback dispatch re-checks that the owner mod is still active and still has permission.
+- When a mod's Lua file is hot-reloaded, pending callbacks from the previous script version are discarded. The underlying HTTP operation may continue until it completes or times out.
 - Lua shutdown joins active workers and releases callback references before `lua_close()`.
 - The current Windows worker uses bounded WinHTTP timeouts and a response-size limit. A shutdown may wait for an in-flight request to time out.
 
