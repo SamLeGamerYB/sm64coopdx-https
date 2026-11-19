@@ -24,7 +24,7 @@ This file records repository-specific integration constraints and the current im
 ## Current native implementation status
 
 - A Windows-only asynchronous HTTPS transport now exists in `src/pc/lua/smlua_network_api.c`, using WinHTTP on worker threads.
-- Lua surface: `network.has_permission()`, `network.is_supported()`, `network.https_request(options, callback)`, owner-only `network.cancel_request(requestId)`, and `network.websocket_connect(url, callbacks)`, `network.websocket_send(id, payload, kind)`, `network.websocket_close(id)`.
+- Lua surface: `network.has_permission()`, `network.is_supported()`, `network.websocket_is_supported()`, `network.https_request(options, callback)`, owner-only `network.cancel_request(requestId)`, and `network.websocket_connect(url, callbacks, headers)`, `network.websocket_send(id, payload, kind)`, `network.websocket_close(id)`.
 - The HTTPS request accepts a caller-selected method, headers, and optional body. The callback receives `statusCode, rawResponseHeaders, responseBody, errorMessage`.
 - At most 8 completed HTTPS callbacks are dispatched per game update, matching the maximum number of concurrent requests.
 - At most 32 queued WebSocket events are dispatched per game update; each socket also has bounded incoming and outgoing queues.
