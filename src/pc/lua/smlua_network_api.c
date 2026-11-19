@@ -447,8 +447,8 @@ static bool network_api_has_wss_prefix(const char* url) {
 
 static bool network_api_ws_reserved_header(const char* name) {
     static const char* reserved[] = {
-        "host", "connection", "upgrade", "sec-websocket-key",
-        "sec-websocket-version", "sec-websocket-extensions"
+        "host", "connection", "upgrade", "content-length", "transfer-encoding",
+        "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions"
     };
     for (size_t i = 0; i < sizeof(reserved) / sizeof(reserved[0]); i++) {
         const char* a = name;
