@@ -8,6 +8,7 @@
 #include "pc/configfile.h"
 #include "pc/mods/mods.h"
 #include "pc/mods/mods_utils.h"
+#include "pc/lua/smlua_network_api.h"
 #include "djui_panel_main.h"
 #include "djui_panel_host.h"
 #include "djui_panel_host_mods.h"
@@ -81,7 +82,14 @@ static void djui_panel_host_mods_description_create(void) {
     sDescriptionPanel = panel;
 }
 
-static void djui_mod_network_checkbox_on_value_change(UNUSED struct DjuiBase* base) {
+static void djui_mod_network_checkbox_on_value_change(struct DjuiBase* base) {
+    if (base->tag >= 0 && base->tag < gLocalMods.entryCount) {
+        struct Mod* mod = gLocalMods.entries[base->tag];
+        if (mod != NULL && !mod->networkAccessAllowed) {
+            // Revoke pending work immediately when the user removes permission.
+            smlua_network_api_discard_mod_requests(mod->relativePath);
+        }
+    }
     // Save immediately so a user's explicit permission choice survives a restart.
     configfile_save(configfile_name());
 }
