@@ -1,45 +1,42 @@
 # Native Lua Network API
 
-This document defines the first version of the native networking API exposed to SM64CoopDX Lua mods. It is intentionally general-purpose: it is not tied to Twitch or to any one mod.
+The native network API is general-purpose and can be used by any SM64CoopDX Lua mod. It is not tied to Twitch or to a specific game mode.
 
-## Scope
+## Current status
 
-- HTTPS requests with caller-selected HTTP methods and headers.
-- Secure WebSockets only (`wss://`), with both text and binary messages.
-- Asynchronous operation: network I/O must never block the game thread.
-- Lua callbacks are dispatched only from the game/main thread.
-- Response and message payloads are kept in memory. This API does not provide a file-download or file-writing facility.
-- The initial implementation target is Windows.
+- **HTTPS:** implemented for Windows builds in the current feature branch; not yet build-tested.
+- **WebSockets:** planned, not implemented yet.
+- **Linux/macOS:** currently return an explicit unsupported result.
+- **Permissions:** opt-in per local mod, disabled by default.
 
-## Lua surface
+## Permission and capability checks
 
-The API is exposed as a `network` table. The HTTPS functions below are implemented in the current feature branch; WebSockets remain planned and are not exposed yet.
-
-### Permission and capability checks
+The API is exposed through the global `network` table.
 
 ```lua
 local allowed = network.has_permission()
 local supported = network.is_supported()
 ```
 
-`has_permission()` reports the active mod's explicit user-granted network permission. `is_supported()` reports whether the current build includes a native transport (currently Windows only).
+- `network.has_permission()` returns whether the calling mod has been explicitly allowed to access the network by the user.
+- `network.is_supported()` returns whether this build has a native transport. It currently returns true on Windows and false elsewhere.
 
-### HTTPS requests
+## HTTPS requests
 
 ```lua
 local requestId, err = network.https_request({
     url = "https://example.invalid/api",
-    method = "POST", -- defaults to GET
+    method = "POST", -- optional; defaults to GET
     headers = {
         ["Content-Type"] = "application/json",
         ["Authorization"] = "Bearer ...",
     },
-    body = "{\\"hello\\":true}", -- optional; Lua strings may also contain binary data
+    body = '{"hello":true}', -- optional; Lua strings may contain binary data
 }, function(status, headers, body, errorMessage)
-    -- status is the HTTP status code, or nil if the request failed
-    -- headers is the raw response header block
-    -- body is the in-memory response body
-    -- errorMessage is nil on success, otherwise an error string
+    -- status: HTTP status code, or nil if the request failed
+    -- headers: raw response header block as a string
+    -- body: in-memory response body as a Lua string
+    -- errorMessage: nil on success, otherwise an error string
 end)
 
 if requestId == nil then
@@ -47,16 +44,29 @@ if requestId == nil then
 end
 ```
 
-Requests are asynchronous. The callback runs on the game thread. The return value is an opaque numeric request ID; cancellation is not exposed yet.
+The function validates the active mod's permission before creating a worker or performing network activity. It returns a numeric request ID immediately; the completion callback runs later on the game thread. Cancellation is not exposed yet.
 
-### WebSocket (planned)
+### HTTPS limits
 
+| Resource | Limit |
+|---|---:|
+| Concurrent requests | 8 |
+| URL length | 2 KiB |
+| Request headers | 16 KiB |
+| Request body | 1 MiB |
+| Response body | 1 MiB |
+| Response reading deadline | 30 seconds |
 
+Only `https://` URLs are accepted. WinHTTP redirects are disabled; if the redirect policy cannot be enforced, the request fails. TLS certificate verification remains enabled by WinHTTP defaults. No response is written to disk.
+
+## WebSockets (planned)
+
+The planned API will support only `wss://`, and will preserve text and binary message types:
 
 ```lua
 local socket = network.websocket_connect("wss://example.invalid/socket", {
     on_open = function() end,
-    on_message = function(message, message_type) end, -- message_type: "text" or "binary"
+    on_message = function(message, message_type) end,
     on_error = function(message) end,
     on_close = function(code, reason) end,
 })
@@ -66,54 +76,20 @@ network.websocket_send(socket, binary_payload, "binary")
 network.websocket_close(socket)
 ```
 
-The connection function returns an opaque handle immediately. A connection failure is reported asynchronously through `on_error` and/or `on_close`. Binary payloads are Lua strings containing arbitrary bytes; they must never be treated as null-terminated text.
+These functions are design examples only and are not available in the current build.
 
-### HTTPS
+## Threading and ownership
 
-```lua
-local request = network.https_request({
-    url = "https://example.invalid/api",
-    method = "POST",
-    headers = {
-        ["Content-Type"] = "application/json",
-        ["Authorization"] = "Bearer ...",
-    },
-    body = "{\"hello\":true}",
-}, {
-    on_complete = function(response) end,
-    on_error = function(message) end,
-})
-```
+- Network I/O runs on native worker threads; workers never call Lua or access the Lua registry.
+- Completion callbacks are dispatched from `smlua_update()` on the game thread.
+- Each request stores a copied mod `relativePath`, not a `struct Mod*`.
+- Callback dispatch re-checks that the owner mod is still active and still has permission.
+- Lua shutdown joins active workers and releases callback references before `lua_close()`.
+- The current Windows worker uses bounded WinHTTP timeouts and a response-size limit. A shutdown may wait for an in-flight request to time out.
 
-The response object will expose the HTTP status, response headers, and an in-memory body. The API must not write response data to disk.
+## Remaining work
 
-## Security and resource rules
-
-- Mod permissions are opt-in and disabled by default. A mod without the relevant permission cannot start network operations.
-- WebSocket URLs must use `wss://`; plain `ws://` is rejected.
-- HTTPS URLs must use `https://`; redirects must not downgrade to HTTP.
-- Request methods and headers are caller-controlled, subject to validation and bounded sizes.
-- The current HTTPS implementation caps request and response bodies at 1 MiB, headers at 16 KiB, active requests at 8, and response reading at 30 seconds. These initial limits are fixed in the native implementation.
-- Queues between worker threads and the game thread are bounded. Overflow must fail safely and be observable, never silently corrupt memory.
-- No Lua API, callback, registry reference, or Lua state may be accessed from a worker thread.
-- Each operation is owned by the mod that created it. The owner is tracked by a stable mod identity, not by retaining a raw `Mod*` across reloads.
-- When a mod is disabled, reloaded, or the Lua state shuts down, its operations are cancelled and their callbacks are discarded. Native resources and worker threads must be fully cleaned up before the Lua state is destroyed.
-- Callback execution re-checks that the owner mod still exists in the active mod list and retains network permission.
-
-## Threading model
-
-1. Lua calls validate arguments and permissions on the main thread.
-2. Native work is queued to a worker. Workers perform only operating-system/network operations and native memory/queue operations.
-3. Workers enqueue immutable completion/message events into a bounded queue.
-4. `smlua_update()` drains a bounded number of events and invokes Lua callbacks on the main thread.
-5. Shutdown first stops accepting work, signals/cancels outstanding operations, waits for workers to finish, frees queued payloads and registry references, and only then calls `lua_close()`.
-
-A blocking network call or an unbounded wait on the game thread is not acceptable.
-
-## Implementation notes
-
-- The current Windows HTTPS transport uses WinHTTP. WebSocket transport is still to be implemented.
-- WebSocket sends must preserve message type (text vs binary) and message boundaries.
-- Receive fragments must be reassembled into complete messages while enforcing the configured maximum message size.
-- HTTPS response bodies are accumulated in memory under the same bounded-resource policy.
-- This document describes the intended contract. It does not claim that the API is implemented or usable yet.
+- Implement secure WebSocket connect/send/receive/close with text and binary frames.
+- Add explicit cancellation and prompt teardown for in-flight HTTPS requests.
+- Implement a non-Windows transport backend or continue returning unsupported.
+- Build and test Windows 32-bit/64-bit and all supported non-Windows CI targets.
