@@ -84,6 +84,8 @@ local socketId, err = network.websocket_connect("wss://example.invalid/socket", 
     on_close = function(id)
         print("WebSocket closed", id)
     end,
+}, {
+    ["Authorization"] = "Bearer ...",
 })
 
 if socketId then
@@ -100,6 +102,8 @@ end
 - `on_message(id, payload, isBinary)` receives a Lua string and a boolean distinguishing text from binary frames.
 - `on_error(id, message)` reports transport errors.
 - `on_close(id)` runs when an established connection ends.
+- The optional third argument is a headers table for explicit handshake headers (for example, `Authorization`). Header names and values are validated and the total is limited to 16 KiB.
+- WinHTTP uses a 15-second WebSocket keep-alive interval and a bounded 60-second receive timeout.
 - `websocket_send` and `websocket_close` return booleans. A send returning true means it was queued, not necessarily delivered.
 - A mod may only send to or close socket IDs it created itself.
 
