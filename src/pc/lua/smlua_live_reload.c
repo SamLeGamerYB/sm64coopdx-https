@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include "smlua.h"
+#include "smlua_network_api.h"
 #include "smlua_require.h"
 #include "pc/mods/mods.h"
 #include "pc/mods/mods_utils.h"
@@ -442,6 +443,8 @@ void smlua_live_reload_update(lua_State* L) {
             // update modified time and reload the module
             file->modifiedTimestamp = timestamp;
             gLuaActiveModFile = file;
+            // Discard callbacks captured by the previous version of this mod.
+            smlua_network_api_discard_mod_requests(mod->relativePath);
             smlua_reload_module(L, mod, file);
         }
 
