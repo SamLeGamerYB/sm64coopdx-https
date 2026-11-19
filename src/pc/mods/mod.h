@@ -42,6 +42,7 @@ struct Mod {
     u16 fileCapacity;
     bool isDirectory;
     bool enabled;
+    bool networkAccessAllowed;
     bool selectable;
     bool renderBehindHud;
     bool pausable;
