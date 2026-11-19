@@ -12,6 +12,12 @@
 #include <wchar.h>
 
 #ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#elif _WIN32_WINNT < 0x0602
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#endif
 #include <windows.h>
 #include <winhttp.h>
 #endif
@@ -692,7 +698,9 @@ static void* network_api_ws_worker(void* argument) {
     ws->connected = true;
     bool closeImmediately = ws->closeRequested;
     pthread_mutex_unlock(&sNetworkApiMutex);
-    network_api_ws_queue_event(ws, NETWORK_WS_EVENT_OPEN, NULL, 0, false);
+    if (!closeImmediately) {
+        network_api_ws_queue_event(ws, NETWORK_WS_EVENT_OPEN, NULL, 0, false);
+    }
 
     if (pthread_create(&ws->sendThread, NULL, network_api_ws_send_worker, ws) == 0) {
         ws->sendThreadStarted = true;
