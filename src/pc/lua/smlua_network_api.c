@@ -235,7 +235,12 @@ static void* network_api_http_worker(void* argument) {
         free(rawHeaders);
     }
 
+    DWORD responseStarted = GetTickCount();
     for (;;) {
+        if (GetTickCount() - responseStarted > 30000) {
+            network_api_set_error(request, "HTTPS response exceeded the 30 second time limit");
+            break;
+        }
         DWORD available = 0;
         if (!WinHttpQueryDataAvailable(httpRequest, &available)) {
             network_api_set_error(request, "Failed while reading HTTPS response");
@@ -450,8 +455,9 @@ static int network_api_https_request(lua_State* L) {
             size_t valueLength = 0;
             const char* name = lua_tolstring(L, -2, &nameLength);
             const char* value = lua_tolstring(L, -1, &valueLength);
-            if (memchr(name, '\0', nameLength) != NULL || memchr(value, '\0', valueLength) != NULL ||
-                strchr(name, ':') != NULL || network_api_contains_line_break(name) ||
+            if (nameLength == 0 || memchr(name, '\0', nameLength) != NULL ||
+                memchr(value, '\0', valueLength) != NULL || strchr(name, ':') != NULL ||
+                network_api_contains_line_break(name) ||
                 network_api_contains_line_break(value)) {
                 lua_pop(L, 2);
                 lua_pop(L, 1);
