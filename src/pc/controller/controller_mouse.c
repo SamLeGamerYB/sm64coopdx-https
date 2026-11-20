@@ -9,6 +9,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 extern HWND gfx_dxgi_get_h_wnd(void);
+extern bool gfx_dxgi_get_cursor_pos_client(POINT* point);
 static bool mouse_relative_prev_cursor_state;
 #endif
 
@@ -75,19 +76,13 @@ void controller_mouse_read_window(void) {
             GetFocus() == game_window);
 
         POINT p;
-        if (GetCursorPos(&p)) {
-            HWND hwnd_under = WindowFromPoint(p);
-            if (hwnd_under == game_window || IsChild(game_window, hwnd_under)) {
-                if (ScreenToClient(game_window, &p)) {
-                    mouse_window_x = p.x - gfx_current_dimensions.x_adjust_4by3;
-                    mouse_window_y = p.y;
-                }
-            } else {
-                // invalidate the mouse position
-                // so the ui isn't interacted with
-                mouse_window_x = -1000;
-                mouse_window_y = -1000;
-            }
+        if (gfx_dxgi_get_cursor_pos_client(&p)) {
+            mouse_window_x = p.x - gfx_current_dimensions.x_adjust_4by3;
+            mouse_window_y = p.y;
+        } else {
+            // invalidate the mouse position so the UI isn't interacted with
+            mouse_window_x = -1000;
+            mouse_window_y = -1000;
         }
     } else {
         mouse_window_buttons = SDL_GetMouseState(&mouse_window_x, &mouse_window_y);
