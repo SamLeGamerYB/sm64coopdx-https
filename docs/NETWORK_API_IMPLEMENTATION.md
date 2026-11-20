@@ -77,3 +77,5 @@ This file records repository-specific integration constraints and the current im
 - The built-in host mod list in `djui_panel_host_mods.c` is the current user-facing permission surface. The Lua-generated per-mod menu remains separate.
 - Mod metadata is not treated as consent; only the user's persisted checkbox selection grants the local mod permission.
 - The Lua runtime lifecycle is suitable for a shared network service, but owner tracking must use a copied `relativePath` string and callback references must remain owned by the current Lua state.
+
+<!-- Temporary CI trigger only; do not merge this marker. -->
