@@ -314,6 +314,8 @@ static void* network_api_http_worker(void* argument) {
     if (components.dwExtraInfoLength > 0) {
         wcsncat(path, components.lpszExtraInfo, components.dwExtraInfoLength);
     }
+    wchar_t* fragment = wcschr(path, L'#');
+    if (fragment != NULL) { *fragment = L'\0'; }
 
     session = WinHttpOpen(L"SM64CoopDX Network API/1.0",
                           WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
@@ -959,6 +961,8 @@ static void* network_api_ws_worker(void* argument) {
     if (components.dwExtraInfoLength > 0) {
         wcsncat(path, components.lpszExtraInfo, components.dwExtraInfoLength);
     }
+    wchar_t* fragment = wcschr(path, L'#');
+    if (fragment != NULL) { *fragment = L'\0'; }
 
     session = WinHttpOpen(L"SM64CoopDX Network API/1.0",
                           WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
