@@ -119,16 +119,19 @@ struct NetworkWebSocket {
     struct NetworkWebSocket* next;
 };
 
-#ifdef _WIN32
 static pthread_mutex_t sNetworkApiMutex = PTHREAD_MUTEX_INITIALIZER;
 static struct NetworkHttpRequest* sNetworkApiRequests = NULL;
 static unsigned int sNetworkApiNextId = 1;
 static unsigned int sNetworkApiRequestCount = 0;
+#ifdef _WIN32
 static struct NetworkWebSocket* sNetworkWebSockets = NULL;
 static unsigned int sNetworkWebSocketCount = 0;
 static unsigned int sNetworkWebSocketNextId = 1;
 #else
-static unsigned int sNetworkApiRequestCount = 0;
+static pthread_once_t sNetworkApiCurlInitOnce = PTHREAD_ONCE_INIT;
+static void network_api_curl_global_init(void) {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+}
 #endif
 
 static bool network_api_has_https_prefix(const char* url) {
@@ -1349,7 +1352,6 @@ static int network_api_cancel_request(lua_State* L) {
         return 1;
     }
 
-#ifdef _WIN32
     bool found = false;
     pthread_mutex_lock(&sNetworkApiMutex);
     for (struct NetworkHttpRequest* request = sNetworkApiRequests; request != NULL; request = request->next) {
@@ -1572,9 +1574,7 @@ static int network_api_https_request(lua_State* L) {
 
 void smlua_network_api_bind(lua_State* L) {
 #ifndef _WIN32
-    static pthread_once_t curlInitOnce = PTHREAD_ONCE_INIT;
-    void network_api_curl_global_init(void);
-    pthread_once(&curlInitOnce, network_api_curl_global_init);
+    pthread_once(&sNetworkApiCurlInitOnce, network_api_curl_global_init);
 #endif
     lua_getglobal(L, "network");
     if (lua_type(L, -1) != LUA_TTABLE) {
