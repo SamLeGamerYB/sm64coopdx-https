@@ -27,7 +27,7 @@ local wssSupported = network.websocket_is_supported()
 
 - `network.has_permission()` returns whether the calling mod has been explicitly allowed to access the network by the user.
 - `network.is_supported()` returns whether this build has a working HTTPS transport.
-- `network.websocket_is_supported()` checks WinHTTP WebSocket entry points on Windows and both the runtime libcurl `wss` protocol and dynamically loaded WebSocket symbols on Linux/macOS.
+- `network.websocket_is_supported()` checks WinHTTP WebSocket entry points on Windows. On Linux/macOS it checks that the runtime libcurl advertises `wss` and exposes the WebSocket send/receive API.
 
 ## HTTPS requests
 
@@ -55,7 +55,7 @@ else
 end
 ```
 
-The function validates the active mod's permission before creating a worker or performing network activity. It returns a numeric request ID immediately; the completion callback runs later on the game thread. The creating mod can request cancellation of its own pending request with `network.cancel_request(requestId)`, which returns a boolean. The callback is suppressed; the worker stops at the next safe point after its current synchronous WinHTTP call returns, so cancellation may take up to the current operation's timeout.
+The function validates the active mod's permission before creating a worker or performing network activity. It returns a numeric request ID immediately; the completion callback runs later on the game thread. The creating mod can request cancellation of its own pending request with `network.cancel_request(requestId)`, which returns a boolean. The callback is suppressed. Windows checks cancellation between synchronous WinHTTP operations; libcurl uses its transfer-progress callback to abort an active transfer.
 
 ### HTTPS limits
 
@@ -68,7 +68,7 @@ The function validates the active mod's permission before creating a worker or p
 | Response body | 1 MiB |
 | Response reading deadline | 30 seconds |
 
-Only `https://` URLs are accepted. WinHTTP redirects, automatic cookies, and ambient authentication are disabled; if this policy cannot be enforced, the request fails. TLS certificate verification remains enabled by WinHTTP defaults. Mods can still provide explicit headers such as `Authorization`. No response is written to disk.
+Only `https://` URLs are accepted. Redirects, automatic cookies, and ambient authentication are disabled in both backends; TLS certificate and hostname verification remain enabled. Mods can still provide explicit headers such as `Authorization`. No response is written to disk.
 
 ## WebSockets
 
@@ -136,8 +136,8 @@ end
 - Each request stores a copied mod `relativePath`, not a `struct Mod*`.
 - Callback dispatch re-checks that the owner mod is still active and still has permission.
 - When a mod's network permission is revoked or one of its Lua files is hot-reloaded, its pending HTTP requests are marked cancelled, WebSockets are asked to close, and callbacks are discarded.
-- Lua shutdown marks requests cancelled, asks WebSockets to close, joins workers, and releases callback references before `lua_close()`. A worker already inside a synchronous WinHTTP call must wait for that call to return; exact WebSocket shutdown timing still needs runtime verification.
-- The HTTPS worker uses bounded WinHTTP timeouts and a response-size limit. Cancellation does not close an HTTP handle from another thread; the worker checks the cancellation flag between WinHTTP operations. WebSocket receive/send work is handled by dedicated native threads and bounded queues.
+- Lua shutdown marks requests cancelled, asks WebSockets to close, joins workers, and releases callback references before `lua_close()`. A worker already inside a synchronous WinHTTP call must wait for that call to return; the libcurl HTTPS worker uses its progress callback to observe cancellation. Exact WebSocket shutdown timing still needs runtime verification.
+- The HTTPS workers use bounded timeouts and response-size limits. Cancellation does not close an HTTP handle from another thread. WinHTTP WebSockets use dedicated send/receive threads; the libcurl WebSocket backend uses one worker loop and bounded queues.
 
 ## Remaining work
 
