@@ -23,6 +23,9 @@
 #include <poll.h>
 #endif
 #include <ctype.h>
+#ifndef _WIN32
+#include <errno.h>
+#endif
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1448,11 +1451,6 @@ static int network_api_websocket_connect(lua_State* L) {
         lua_pushstring(L, "This mod has not been granted network access");
         return 2;
     }
-#ifndef _WIN32
-    lua_pushnil(L);
-    lua_pushstring(L, "WSS transport is currently supported on Windows only");
-    return 2;
-#else
     size_t urlLength = 0;
     const char* url = lua_tolstring(L, 1, &urlLength);
     if (urlLength == 0 || urlLength > NETWORK_API_MAX_URL ||
@@ -1464,7 +1462,11 @@ static int network_api_websocket_connect(lua_State* L) {
     }
     if (!network_api_load_websocket_functions()) {
         lua_pushnil(L);
+#ifdef _WIN32
         lua_pushstring(L, "WSS requires Windows 8 or newer with WinHTTP WebSocket support");
+#else
+        lua_pushstring(L, "WSS requires a libcurl build with WebSocket support (7.86.0 or newer)");
+#endif
         return 2;
     }
     if (sNetworkApiWebSocketCount >= NETWORK_WS_MAX_CONNECTIONS) {
@@ -1595,7 +1597,6 @@ static int network_api_websocket_connect(lua_State* L) {
     ws->threadStarted = true;
     lua_pushinteger(L, ws->id);
     return 1;
-#endif
 }
 
 static int network_api_websocket_send(lua_State* L) {
@@ -1611,9 +1612,6 @@ static int network_api_websocket_send(lua_State* L) {
         lua_pushboolean(L, false);
         return 1;
     }
-#ifndef _WIN32
-    lua_pushboolean(L, false);
-#else
     size_t payloadLength = 0;
     const char* payload = lua_tolstring(L, 2, &payloadLength);
     bool binary = false;
@@ -1657,7 +1655,6 @@ static int network_api_websocket_send(lua_State* L) {
     pthread_cond_signal(&ws->condition);
     pthread_mutex_unlock(&sNetworkApiMutex);
     lua_pushboolean(L, true);
-#endif
     return 1;
 }
 
@@ -1672,9 +1669,6 @@ static int network_api_websocket_close(lua_State* L) {
         lua_pushboolean(L, false);
         return 1;
     }
-#ifndef _WIN32
-    lua_pushboolean(L, false);
-#else
     pthread_mutex_lock(&sNetworkApiMutex);
     struct NetworkWebSocket* ws = network_api_ws_find_locked((unsigned int)id, owner->relativePath);
     if (ws != NULL) {
@@ -1683,7 +1677,6 @@ static int network_api_websocket_close(lua_State* L) {
     }
     pthread_mutex_unlock(&sNetworkApiMutex);
     lua_pushboolean(L, ws != NULL);
-#endif
     return 1;
 }
 
@@ -1703,11 +1696,7 @@ static int network_api_is_supported(lua_State* L) {
 }
 
 static int network_api_websocket_is_supported(lua_State* L) {
-#ifdef _WIN32
     lua_pushboolean(L, network_api_load_websocket_functions());
-#else
-    lua_pushboolean(L, false);
-#endif
     return 1;
 }
 
@@ -1998,7 +1987,6 @@ void smlua_network_api_discard_mod_requests(const char* relativePath) {
             request->cancelled = true;
         }
     }
-#ifdef _WIN32
     for (struct NetworkWebSocket* ws = sNetworkWebSockets; ws != NULL; ws = ws->next) {
         if (strcmp(ws->ownerPath, relativePath) == 0) {
             ws->callbacksSuppressed = true;
@@ -2006,12 +1994,10 @@ void smlua_network_api_discard_mod_requests(const char* relativePath) {
             pthread_cond_broadcast(&ws->condition);
         }
     }
-#endif
     pthread_mutex_unlock(&sNetworkApiMutex);
 }
 
 
-#ifdef _WIN32
 static void network_api_ws_update(lua_State* L) {
     unsigned int processed = 0;
     while (processed < 32) {
@@ -2089,7 +2075,6 @@ static void network_api_ws_update(lua_State* L) {
         free(event);
     }
 }
-#endif
 
 void smlua_network_api_update(lua_State* L) {
     unsigned int processed = 0;
@@ -2137,9 +2122,7 @@ void smlua_network_api_update(lua_State* L) {
         luaL_unref(L, LUA_REGISTRYINDEX, completed->callbackRef);
         network_api_free_request(completed);
     }
-#ifdef _WIN32
     network_api_ws_update(L);
-#endif
 }
 
 void smlua_network_api_shutdown(lua_State* L) {
@@ -2161,7 +2144,6 @@ void smlua_network_api_shutdown(lua_State* L) {
         requests = next;
     }
 
-#ifdef _WIN32
     pthread_mutex_lock(&sNetworkApiMutex);
     struct NetworkWebSocket* sockets = sNetworkWebSockets;
     sNetworkWebSockets = NULL;
@@ -2186,6 +2168,5 @@ void smlua_network_api_shutdown(lua_State* L) {
         sockets = next;
     }
     sNetworkApiWebSocketCount = 0;
-#endif
     sNetworkApiRequestCount = 0;
 }
