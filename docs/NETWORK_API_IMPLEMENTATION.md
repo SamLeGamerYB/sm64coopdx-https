@@ -14,7 +14,7 @@ This file records repository-specific integration constraints and the current im
 ## Platform and build constraints
 
 - The repository's CI workflow builds Windows, Linux, SteamOS, macOS ARM and macOS Intel. Its pull-request trigger targets `dev` and `feature/websocket-api`; changes on this feature branch can be validated without targeting `main`.
-- `scripts/build-libcurl.sh` builds a checksum-pinned static libcurl 8.23.0 with `--enable-websockets`, verifies the `WSS` protocol and TLS feature, and exposes the static archive and OpenSSL paths to the following build step. Linux/SteamOS and both macOS CI targets statically link this backend, avoiding new runtime libcurl/OpenSSL dependencies. Local Unix builds may use the system libcurl and must report WSS unavailable when its WebSocket support is absent.
+- `scripts/build-libcurl.sh` builds a checksum-pinned static libcurl 8.23.0 with `--enable-websockets`, verifies the `WSS` protocol and TLS feature, and exposes the static archive and OpenSSL paths to the following build step. The Linux/SteamOS and both macOS CI jobs are configured to statically link this backend, avoiding new runtime libcurl/OpenSSL dependencies; this workflow configuration has not yet been verified by a run. Local Unix builds may use the system libcurl and must report WSS unavailable when its WebSocket support is absent.
 - Windows CI uses MSYS2 MinGW (both 32-bit and 64-bit toolchains). WinHTTP is a Windows system library, but it must be explicitly linked with `-lwinhttp` if used.
 - Windows links WinINet, Winsock, and WinHTTP for the current HTTPS implementation.
 - New C sources in `src/pc/lua` are discovered automatically through `SRC_DIRS`.
