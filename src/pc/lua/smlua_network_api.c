@@ -1220,10 +1220,12 @@ static bool network_api_curl_wait(curl_socket_t socket, short events, int timeou
     return result > 0 && (descriptor.revents & (events | POLLERR | POLLHUP | POLLNVAL)) != 0;
 }
 
-static bool network_api_curl_ws_send_message(CURL* curl, curl_socket_t socket,
+static bool network_api_curl_ws_send_message(struct NetworkWebSocket* ws, CURL* curl,
+                                             curl_socket_t socket,
                                              struct NetworkWebSocketMessage* message) {
     const size_t maxFrame = 64 * 1024;
     size_t offset = 0;
+    int waited = 0;
     bool emptyPending = message->payloadLength == 0;
     do {
         size_t frameLength = message->payloadLength - offset;
@@ -1237,13 +1239,17 @@ static bool network_api_curl_ws_send_message(CURL* curl, curl_socket_t socket,
             CURLcode result = sNetworkApiCurlWebSocketSend(curl, data + frameOffset, frameLength - frameOffset,
                                            &sent, 0, flags);
             if (result == CURLE_AGAIN) {
-                if (!network_api_curl_wait(socket, POLLOUT, 1000)) { continue; }
+                if (network_api_ws_is_closing(ws) || waited >= 10000) { return false; }
+                network_api_curl_wait(socket, POLLOUT, 100);
+                waited += 100;
                 continue;
             }
             if (result != CURLE_OK) { return false; }
             frameOffset += sent;
             if (sent == 0 && frameOffset < frameLength) {
-                network_api_curl_wait(socket, POLLOUT, 1000);
+                if (network_api_ws_is_closing(ws) || waited >= 10000) { return false; }
+                network_api_curl_wait(socket, POLLOUT, 100);
+                waited += 100;
             }
         } while (frameOffset < frameLength);
         offset += frameLength;
@@ -1374,11 +1380,13 @@ static void* network_api_ws_worker(void* argument) {
         pthread_mutex_unlock(&sNetworkApiMutex);
 
         if (outgoing != NULL) {
-            bool sent = network_api_curl_ws_send_message(curl, socket, outgoing);
+            bool sent = network_api_curl_ws_send_message(ws, curl, socket, outgoing);
             free(outgoing->payload);
             free(outgoing);
             if (!sent) {
-                network_api_ws_fail(ws, "WebSocket send failed");
+                if (!network_api_ws_is_closing(ws)) {
+                    network_api_ws_fail(ws, "WebSocket send failed");
+                }
                 break;
             }
         }
