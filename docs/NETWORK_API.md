@@ -27,7 +27,7 @@ local wssSupported = network.websocket_is_supported()
 
 - `network.has_permission()` returns whether the calling mod has been explicitly allowed to access the network by the user.
 - `network.is_supported()` returns whether this build has a working HTTPS transport.
-- `network.websocket_is_supported()` checks WinHTTP WebSocket entry points on Windows and the runtime libcurl `wss` protocol on Linux/macOS.
+- `network.websocket_is_supported()` checks WinHTTP WebSocket entry points on Windows and both the runtime libcurl `wss` protocol and dynamically loaded WebSocket symbols on Linux/macOS.
 
 ## HTTPS requests
 
@@ -72,7 +72,7 @@ Only `https://` URLs are accepted. WinHTTP redirects, automatic cookies, and amb
 
 ## WebSockets
 
-All supported builds accept only `wss://` URLs. Windows uses WinHTTP; Linux/macOS use libcurl's WebSocket interface (7.86.0+). The connection is asynchronous and returns a numeric socket ID immediately. Callback functions are optional:
+All supported builds accept only `wss://` URLs. Windows uses WinHTTP; Linux/macOS use libcurl's optional WebSocket interface (7.86.0+). That upstream interface remains experimental, so builds without it report WebSocket support as unavailable. The connection is asynchronous and returns a numeric socket ID immediately. Callback functions are optional:
 
 ```lua
 local socketId, err = network.websocket_connect("wss://example.invalid/socket", {
@@ -142,5 +142,6 @@ end
 ## Remaining work
 
 - Build and test Windows 32-bit/64-bit, Linux/SteamOS, and both macOS architectures.
+- Decide whether to keep the upstream experimental libcurl WebSocket API or replace it with a stable dedicated backend before declaring WSS production-ready.
 - Verify the minimum libcurl version and runtime availability of its WebSocket protocol on each supported Linux/macOS distribution.
 - Run HTTPS and WSS integration tests, including close, cancellation, message fragmentation, and oversized payload cases.
