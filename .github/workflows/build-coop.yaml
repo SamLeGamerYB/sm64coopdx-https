@@ -9,7 +9,7 @@ on:
 
 jobs:
     build-linux:
-        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]') || contains(github.event.head_commit.message, '[fix]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
         runs-on: ubuntu-24.04
         steps:
             - name: Checkout repository
@@ -47,7 +47,7 @@ jobs:
                 path: ./build/us_pc/sm64coopdx_Linux.zip
 
     build-steamos:
-        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]') || contains(github.event.head_commit.message, '[fix]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
         runs-on: ubuntu-24.04
         steps:
             - name: Checkout repository
@@ -85,7 +85,7 @@ jobs:
                 path: ./build/us_pc/sm64coopdx_SteamOS.zip
 
     build-windows:
-        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]') || contains(github.event.head_commit.message, '[fix]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
         runs-on: windows-latest
         defaults:
             run:
@@ -131,7 +131,7 @@ jobs:
                 path: ./build/us_pc/sm64coopdx_Windows.zip
 
     build-macos-arm:
-        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]') || contains(github.event.head_commit.message, '[fix]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
         runs-on: macos-26
         steps:
             - name: Checkout repository
@@ -193,7 +193,7 @@ jobs:
                 path: ./build/us_pc/sm64coopdx_macOS_ARM.zip
 
     build-macos-intel:
-        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+        if: ${{ (github.event_name != 'push' || contains(github.event.head_commit.message, '[build]') || contains(github.event.head_commit.message, '[fix]')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
         runs-on: macos-15-intel
         steps:
             - name: Checkout repository
