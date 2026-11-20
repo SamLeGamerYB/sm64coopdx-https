@@ -1104,10 +1104,15 @@ static bool network_api_load_websocket_functions(void) {
     }
     if (!wssProtocolAvailable) { return false; }
 
+#ifdef NETWORK_API_CURL_WS_STATIC
+    sNetworkApiCurlWebSocketSend = curl_ws_send;
+    sNetworkApiCurlWebSocketReceive = curl_ws_recv;
+#else
     sNetworkApiCurlWebSocketSend =
         (NetworkApiCurlWebSocketSendFn)dlsym(RTLD_DEFAULT, "curl_ws_send");
     sNetworkApiCurlWebSocketReceive =
         (NetworkApiCurlWebSocketReceiveFn)dlsym(RTLD_DEFAULT, "curl_ws_recv");
+#endif
     sNetworkApiCurlWebSocketFunctionsAvailable =
         sNetworkApiCurlWebSocketSend != NULL && sNetworkApiCurlWebSocketReceive != NULL;
     return sNetworkApiCurlWebSocketFunctionsAvailable;
