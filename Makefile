@@ -715,6 +715,19 @@ endif
 
 BACKEND_LDFLAGS :=
 
+# libcurl is the shared HTTPS/WebSocket transport for Unix-like platforms.
+# Homebrew's curl is keg-only on macOS, so use its explicit prefix.
+ifeq ($(WINDOWS_BUILD),0)
+  ifeq ($(HOST_OS),Darwin)
+    CURL_PREFIX := $(shell brew --prefix curl)
+    BACKEND_CFLAGS += -I$(CURL_PREFIX)/include
+    BACKEND_LDFLAGS += -L$(CURL_PREFIX)/lib -lcurl
+  else
+    BACKEND_CFLAGS += $(shell pkg-config --cflags libcurl)
+    BACKEND_LDFLAGS += $(shell pkg-config --libs libcurl)
+  endif
+endif
+
 # D3D11 flags
 ifeq ($(WINDOWS_BUILD),1)
   DXBITS := `cat $(ENDIAN_BITWIDTH) | tr ' ' '\n' | tail -1`
@@ -858,8 +871,6 @@ LDFLAGS += -lz
 # Update checker library
 ifeq ($(WINDOWS_BUILD),1)
   LDFLAGS += -lwininet -lwinhttp
-else
-  LDFLAGS += -lcurl
 endif
 
 # Lua
