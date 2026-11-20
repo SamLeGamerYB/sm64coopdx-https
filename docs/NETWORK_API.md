@@ -10,8 +10,9 @@ The Lua API and permission model stay the same on every platform. Native transpo
 
 ## Current status
 
-- **Windows:** WinHTTP HTTPS and WSS implementations exist in this branch, but have not yet been build-tested.
-- **Linux/SteamOS and macOS:** cross-platform libcurl transports are still to be implemented; they currently return an explicit unsupported result.
+- **Windows:** HTTPS and WSS use WinHTTP.
+- **Linux/SteamOS and macOS:** HTTPS and WSS use libcurl. The WebSocket API requires libcurl 7.86.0 or newer and a build that enables its WebSocket protocol.
+- **Verification:** the new Unix transports have not yet passed CI or runtime tests; do not treat them as verified.
 - **Permissions:** opt-in per local mod, disabled by default.
 
 ## Permission and capability checks
@@ -26,7 +27,7 @@ local wssSupported = network.websocket_is_supported()
 
 - `network.has_permission()` returns whether the calling mod has been explicitly allowed to access the network by the user.
 - `network.is_supported()` returns whether this build has a working HTTPS transport.
-- `network.websocket_is_supported()` returns whether this build has a working secure WebSocket transport. It must reflect runtime libcurl capabilities on Linux/macOS and WinHTTP capabilities on Windows.
+- `network.websocket_is_supported()` checks WinHTTP WebSocket entry points on Windows and the runtime libcurl `wss` protocol on Linux/macOS.
 
 ## HTTPS requests
 
@@ -71,7 +72,7 @@ Only `https://` URLs are accepted. WinHTTP redirects, automatic cookies, and amb
 
 ## WebSockets
 
-All supported builds accept only `wss://` URLs once their native WebSocket backend is implemented. The connection is asynchronous and returns a numeric socket ID immediately. Callback functions are optional:
+All supported builds accept only `wss://` URLs. Windows uses WinHTTP; Linux/macOS use libcurl's WebSocket interface (7.86.0+). The connection is asynchronous and returns a numeric socket ID immediately. Callback functions are optional:
 
 ```lua
 local socketId, err = network.websocket_connect("wss://example.invalid/socket", {
@@ -112,7 +113,7 @@ end
 - `on_error(id, message)` reports transport errors.
 - `on_close(id)` runs when an established connection ends.
 - The optional third argument is a headers table for explicit handshake headers (for example, `Authorization`). Header names and values are validated and the total is limited to 16 KiB.
-- WinHTTP is configured with a 15-second WebSocket keep-alive interval, a 60-second receive timeout, and a 5-second close-handshake timeout. Actual idle and shutdown timing still needs runtime verification.
+- WinHTTP is configured with a 15-second WebSocket keep-alive interval, a 60-second receive timeout, and a 5-second close-handshake timeout. The libcurl backend uses TCP keep-alive and a bounded close wait. Both backends still require runtime timing verification.
 - `websocket_send` and `websocket_close` return booleans. A send returning true means it was queued, not necessarily delivered.
 - A mod may only send to or close socket IDs it created itself.
 
@@ -140,6 +141,6 @@ end
 
 ## Remaining work
 
-- Implement libcurl HTTPS and WSS transports for Linux/SteamOS and macOS while preserving the existing Windows WinHTTP backend.
-- Confirm the minimum libcurl version needed for WebSocket support and ensure CI/runtime dependencies meet it.
 - Build and test Windows 32-bit/64-bit, Linux/SteamOS, and both macOS architectures.
+- Verify the minimum libcurl version and runtime availability of its WebSocket protocol on each supported Linux/macOS distribution.
+- Run HTTPS and WSS integration tests, including close, cancellation, message fragmentation, and oversized payload cases.
