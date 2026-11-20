@@ -43,7 +43,7 @@ CONFIGURE_ARGS=(
   "--without-ngtcp2"
   "--without-libidn2"
   "--without-libgsasl"
-  "--without-ldap"
+  "--disable-ldap"
 )
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
