@@ -1070,13 +1070,362 @@ static void network_api_ws_free(struct NetworkWebSocket* ws) {
     }
     free(ws->url);
     free(ws->headers);
+
+    pthread_cond_destroy(&ws->condition);
+    free(ws);
+}
+#else
+
+#if LIBCURL_VERSION_NUM >= 0x075600
+static bool network_api_load_websocket_functions(void) {
+    const curl_version_info_data* info = curl_version_info(CURLVERSION_NOW);
+    if (info == NULL || info->protocols == NULL) { return false; }
+    for (const char* const* protocol = info->protocols; *protocol != NULL; protocol++) {
+        if (strcmp(*protocol, "wss") == 0) { return true; }
+    }
+    return false;
+}
+#else
+static bool network_api_load_websocket_functions(void) {
+    return false;
+}
+#endif
+
+static bool network_api_has_wss_prefix(const char* url) {
+    static const char prefix[] = "wss://";
+    if (strlen(url) < sizeof(prefix) - 1) { return false; }
+    for (size_t i = 0; i < sizeof(prefix) - 1; i++) {
+        if (tolower((unsigned char)url[i]) != prefix[i]) { return false; }
+    }
+    return true;
+}
+
+static bool network_api_ws_reserved_header(const char* name) {
+    static const char* reserved[] = {
+        "host", "connection", "upgrade", "content-length", "transfer-encoding",
+        "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions"
+    };
+    for (size_t i = 0; i < sizeof(reserved) / sizeof(reserved[0]); i++) {
+        const char* a = name;
+        const char* b = reserved[i];
+        while (*a != '\0' && *b != '\0' &&
+               tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+            a++;
+            b++;
+        }
+        if (*a == '\0' && *b == '\0') { return true; }
+    }
+    return false;
+}
+
+static void network_api_ws_queue_event(struct NetworkWebSocket* ws,
+                                       enum NetworkWebSocketEventType type,
+                                       const char* payload, size_t payloadLength,
+                                       bool binary) {
+    struct NetworkWebSocketEvent* event = calloc(1, sizeof(*event));
+    if (event == NULL) { return; }
+    if (payloadLength > 0) {
+        event->payload = malloc(payloadLength);
+        if (event->payload == NULL) { free(event); return; }
+        memcpy(event->payload, payload, payloadLength);
+    }
+    event->payloadLength = payloadLength;
+    event->type = type;
+    event->binary = binary;
+    pthread_mutex_lock(&sNetworkApiMutex);
+    if (ws->eventCount >= 32 || payloadLength > NETWORK_WS_MAX_MESSAGE - ws->eventBytes) {
+        ws->closeRequested = true;
+        ws->transportFailed = true;
+        pthread_cond_broadcast(&ws->condition);
+        pthread_mutex_unlock(&sNetworkApiMutex);
+        free(event->payload);
+        free(event);
+        return;
+    }
+    if (ws->eventTail == NULL) { ws->eventHead = event; }
+    else { ws->eventTail->next = event; }
+    ws->eventTail = event;
+    ws->eventCount++;
+    ws->eventBytes += payloadLength;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+}
+
+static void network_api_ws_set_error(struct NetworkWebSocket* ws, const char* message) {
+    network_api_ws_queue_event(ws, NETWORK_WS_EVENT_ERROR, message, strlen(message), false);
+}
+
+static bool network_api_ws_is_closing(struct NetworkWebSocket* ws) {
+    pthread_mutex_lock(&sNetworkApiMutex);
+    bool closing = ws->closeRequested || ws->callbacksSuppressed;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    return closing;
+}
+
+static void network_api_ws_free_messages(struct NetworkWebSocket* ws) {
+    struct NetworkWebSocketMessage* message = ws->sendHead;
+    while (message != NULL) {
+        struct NetworkWebSocketMessage* next = message->next;
+        free(message->payload);
+        free(message);
+        message = next;
+    }
+    ws->sendHead = ws->sendTail = NULL;
+}
+
+#if LIBCURL_VERSION_NUM >= 0x075600
+static bool network_api_curl_wait(curl_socket_t socket, short events, int timeoutMs) {
+    struct pollfd descriptor;
+    descriptor.fd = socket;
+    descriptor.events = events;
+    descriptor.revents = 0;
+    int result;
+    do {
+        result = poll(&descriptor, 1, timeoutMs);
+    } while (result < 0 && errno == EINTR);
+    return result > 0 && (descriptor.revents & (events | POLLERR | POLLHUP | POLLNVAL)) != 0;
+}
+
+static bool network_api_curl_ws_send_message(CURL* curl, curl_socket_t socket,
+                                             struct NetworkWebSocketMessage* message) {
+    const size_t maxFrame = 64 * 1024;
+    size_t offset = 0;
+    bool emptyPending = message->payloadLength == 0;
+    do {
+        size_t frameLength = message->payloadLength - offset;
+        if (frameLength > maxFrame) { frameLength = maxFrame; }
+        unsigned int flags = message->binary ? CURLWS_BINARY : CURLWS_TEXT;
+        if (offset + frameLength < message->payloadLength) { flags |= CURLWS_CONT; }
+        size_t frameOffset = 0;
+        do {
+            size_t sent = 0;
+            const char* data = message->payload != NULL ? message->payload + offset + frameOffset : "";
+            CURLcode result = curl_ws_send(curl, data + frameOffset, frameLength - frameOffset,
+                                           &sent, 0, flags);
+            if (result == CURLE_AGAIN) {
+                if (!network_api_curl_wait(socket, POLLOUT, 1000)) { continue; }
+                continue;
+            }
+            if (result != CURLE_OK) { return false; }
+            frameOffset += sent;
+            if (sent == 0 && frameOffset < frameLength) {
+                network_api_curl_wait(socket, POLLOUT, 1000);
+            }
+        } while (frameOffset < frameLength);
+        offset += frameLength;
+        emptyPending = false;
+    } while (offset < message->payloadLength || emptyPending);
+    return true;
+}
+
+static bool network_api_curl_ws_send_close(CURL* curl, curl_socket_t socket) {
+    const unsigned char closeStatus[2] = { 0x03, 0xE8 };
+    size_t sent = 0;
+    CURLcode result;
+    do {
+        result = curl_ws_send(curl, closeStatus, sizeof(closeStatus), &sent, 0, CURLWS_CLOSE);
+        if (result == CURLE_AGAIN) { network_api_curl_wait(socket, POLLOUT, 100); }
+    } while (result == CURLE_AGAIN);
+    return result == CURLE_OK;
+}
+
+static void network_api_ws_fail(struct NetworkWebSocket* ws, const char* message) {
+    network_api_ws_set_error(ws, message);
+    pthread_mutex_lock(&sNetworkApiMutex);
+    ws->transportFailed = true;
+    ws->closeRequested = true;
+    pthread_cond_broadcast(&ws->condition);
+    pthread_mutex_unlock(&sNetworkApiMutex);
+}
+
+static void* network_api_ws_worker(void* argument) {
+    struct NetworkWebSocket* ws = argument;
+    CURL* curl = NULL;
+    struct curl_slist* headers = NULL;
+    curl_socket_t socket = CURL_SOCKET_BAD;
+    char errorBuffer[CURL_ERROR_SIZE] = {0};
+    char receiveBuffer[16384];
+    char* messageBuffer = NULL;
+    size_t messageLength = 0;
+    bool messageBinary = false;
+    bool connected = false;
+    bool remoteClosed = false;
+
+    if (network_api_ws_is_closing(ws)) { goto cleanup; }
+    curl = curl_easy_init();
+    if (curl == NULL) {
+        network_api_ws_set_error(ws, "Could not initialize libcurl WebSocket");
+        goto cleanup;
+    }
+    headers = network_api_curl_headers(ws->headers);
+    if (ws->headers != NULL && ws->headers[0] != '\0' && headers == NULL) {
+        network_api_ws_set_error(ws, "Could not allocate WebSocket headers");
+        goto cleanup;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, ws->url);
+    curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 2L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 15000L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
+#if LIBCURL_VERSION_NUM >= 0x075500
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "wss");
+#else
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_WSS);
+#endif
+
+    CURLcode result = curl_easy_perform(curl);
+    if (result != CURLE_OK) {
+        network_api_ws_set_error(ws, errorBuffer[0] != '\0' ? errorBuffer : curl_easy_strerror(result));
+        goto cleanup;
+    }
+    if (curl_easy_getinfo(curl, CURLINFO_ACTIVESOCKET, &socket) != CURLE_OK ||
+        socket == CURL_SOCKET_BAD) {
+        network_api_ws_set_error(ws, "Could not obtain WebSocket network socket");
+        goto cleanup;
+    }
+
+    pthread_mutex_lock(&sNetworkApiMutex);
+    ws->connected = true;
+    bool closeImmediately = ws->closeRequested || ws->callbacksSuppressed;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    connected = true;
+    if (!closeImmediately) { network_api_ws_queue_event(ws, NETWORK_WS_EVENT_OPEN, NULL, 0, false); }
+
+    while (!network_api_ws_is_closing(ws)) {
+        struct NetworkWebSocketMessage* outgoing = NULL;
+        pthread_mutex_lock(&sNetworkApiMutex);
+        outgoing = ws->sendHead;
+        if (outgoing != NULL) {
+            ws->sendHead = outgoing->next;
+            if (ws->sendHead == NULL) { ws->sendTail = NULL; }
+            if (ws->sendCount > 0) { ws->sendCount--; }
+            if (ws->sendBytes >= outgoing->payloadLength) { ws->sendBytes -= outgoing->payloadLength; }
+        }
+        pthread_mutex_unlock(&sNetworkApiMutex);
+
+        if (outgoing != NULL) {
+            bool sent = network_api_curl_ws_send_message(curl, socket, outgoing);
+            free(outgoing->payload);
+            free(outgoing);
+            if (!sent) {
+                network_api_ws_fail(ws, "WebSocket send failed");
+                break;
+            }
+        }
+
+        if (!network_api_curl_wait(socket, POLLIN, 100)) { continue; }
+        for (;;) {
+            size_t received = 0;
+            const struct curl_ws_frame* metadata = NULL;
+            result = curl_ws_recv(curl, receiveBuffer, sizeof(receiveBuffer), &received, &metadata);
+            if (result == CURLE_AGAIN) { break; }
+            if (result == CURLE_GOT_NOTHING) {
+                remoteClosed = true;
+                break;
+            }
+            if (result != CURLE_OK || metadata == NULL) {
+                network_api_ws_fail(ws, "WebSocket receive failed");
+                remoteClosed = true;
+                break;
+            }
+            if (metadata->flags & CURLWS_CLOSE) {
+                remoteClosed = true;
+                break;
+            }
+            if (messageLength == 0) {
+                messageBinary = (metadata->flags & CURLWS_BINARY) != 0;
+            }
+            if (received > NETWORK_WS_MAX_MESSAGE - messageLength) {
+                network_api_ws_fail(ws, "WebSocket message exceeds the 1 MiB limit");
+                remoteClosed = true;
+                break;
+            }
+            if (received > 0) {
+                char* expanded = realloc(messageBuffer, messageLength + received);
+                if (expanded == NULL) {
+                    network_api_ws_fail(ws, "Out of memory receiving WebSocket message");
+                    remoteClosed = true;
+                    break;
+                }
+                messageBuffer = expanded;
+                memcpy(messageBuffer + messageLength, receiveBuffer, received);
+                messageLength += received;
+            }
+            if (metadata->bytesleft == 0 && !(metadata->flags & CURLWS_CONT)) {
+                network_api_ws_queue_event(ws, NETWORK_WS_EVENT_MESSAGE,
+                                           messageBuffer, messageLength, messageBinary);
+                free(messageBuffer);
+                messageBuffer = NULL;
+                messageLength = 0;
+            }
+            if (received == 0 && metadata->bytesleft == 0) { break; }
+        }
+        if (remoteClosed) { break; }
+    }
+
+    if (connected && !remoteClosed) {
+        network_api_curl_ws_send_close(curl, socket);
+        int waited = 0;
+        while (waited < 5000) {
+            if (!network_api_curl_wait(socket, POLLIN, 100)) { waited += 100; continue; }
+            size_t received = 0;
+            const struct curl_ws_frame* metadata = NULL;
+            result = curl_ws_recv(curl, receiveBuffer, sizeof(receiveBuffer), &received, &metadata);
+            if (result == CURLE_OK && metadata != NULL && (metadata->flags & CURLWS_CLOSE)) {
+                remoteClosed = true;
+                break;
+            }
+            if (result != CURLE_AGAIN && result != CURLE_OK) { break; }
+            waited += 100;
+        }
+    } else if (connected && remoteClosed) {
+        network_api_curl_ws_send_close(curl, socket);
+    }
+
+    network_api_ws_free_messages(ws);
+    network_api_ws_queue_event(ws, NETWORK_WS_EVENT_CLOSE, NULL, 0, false);
+
+cleanup:
+    free(messageBuffer);
+    network_api_ws_free_messages(ws);
+    if (headers != NULL) { curl_slist_free_all(headers); }
+    if (curl != NULL) { curl_easy_cleanup(curl); }
+    pthread_mutex_lock(&sNetworkApiMutex);
+    ws->complete = true;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    return NULL;
+}
+#else
+static void* network_api_ws_worker(void* argument) {
+    UNUSED argument;
+    return NULL;
+}
+#endif
+
+static void network_api_ws_free(struct NetworkWebSocket* ws) {
+    if (ws == NULL) { return; }
+    network_api_ws_free_messages(ws);
+    struct NetworkWebSocketEvent* event = ws->eventHead;
+    while (event != NULL) {
+        struct NetworkWebSocketEvent* next = event->next;
+        free(event->payload);
+        free(event);
+        event = next;
+    }
+    free(ws->url);
+    free(ws->headers);
     pthread_cond_destroy(&ws->condition);
     free(ws);
 }
 #endif
 
 
-#ifdef _WIN32
 static struct NetworkWebSocket* network_api_ws_find_locked(unsigned int id, const char* ownerPath) {
     for (struct NetworkWebSocket* ws = sNetworkWebSockets; ws != NULL; ws = ws->next) {
         if (ws->id == id && strcmp(ws->ownerPath, ownerPath) == 0) { return ws; }
