@@ -11,7 +11,7 @@ SOURCE_DIR="$WORK_DIR/curl-$CURL_VERSION"
 
 mkdir -p "$WORK_DIR" "$CURL_PREFIX"
 curl --fail --location --retry 3 "https://curl.se/download/curl-$CURL_VERSION.tar.xz" --output "$ARCHIVE"
-EXPECTED_SHA256="95b22eb32bf6d1fa6e3e9463bdb61cece3efc56d86576a9b3cbd428246a6d854"
+EXPECTED_SHA256="8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5"
 if command -v shasum >/dev/null 2>&1; then
   ACTUAL_SHA256="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
 else
