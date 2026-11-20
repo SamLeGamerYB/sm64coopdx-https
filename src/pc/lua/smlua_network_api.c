@@ -1230,7 +1230,7 @@ static bool network_api_curl_ws_send_message(CURL* curl, curl_socket_t socket,
         size_t frameOffset = 0;
         do {
             size_t sent = 0;
-            const char* data = message->payload != NULL ? message->payload + offset + frameOffset : "";
+            const char* data = message->payload != NULL ? message->payload + offset : "";
             CURLcode result = sNetworkApiCurlWebSocketSend(curl, data + frameOffset, frameLength - frameOffset,
                                            &sent, 0, flags);
             if (result == CURLE_AGAIN) {
@@ -1240,7 +1240,7 @@ static bool network_api_curl_ws_send_message(CURL* curl, curl_socket_t socket,
             if (result != CURLE_OK) { return false; }
             frameOffset += sent;
             if (sent == 0 && frameOffset < frameLength) {
-                network_api_curl_wait(socket, POLLOUT, 1000);
+                network_api_curl_wait(socket, POLLIN, 1000);
             }
         } while (frameOffset < frameLength);
         offset += frameLength;
@@ -1251,17 +1251,26 @@ static bool network_api_curl_ws_send_message(CURL* curl, curl_socket_t socket,
 
 static bool network_api_curl_ws_send_close(CURL* curl, curl_socket_t socket) {
     const unsigned char closeStatus[2] = { 0x03, 0xE8 };
-    size_t sent = 0;
-    CURLcode result;
+    size_t offset = 0;
     int waited = 0;
-    do {
-        result = sNetworkApiCurlWebSocketSend(curl, closeStatus, sizeof(closeStatus), &sent, 0, CURLWS_CLOSE);
+    while (offset < sizeof(closeStatus) && waited < 5000) {
+        size_t sent = 0;
+        CURLcode result = sNetworkApiCurlWebSocketSend(curl, closeStatus + offset,
+                                                       sizeof(closeStatus) - offset, &sent,
+                                                       0, CURLWS_CLOSE);
         if (result == CURLE_AGAIN) {
             network_api_curl_wait(socket, POLLIN, 100);
             waited += 100;
+            continue;
         }
-    } while (result == CURLE_AGAIN && waited < 5000);
-    return result == CURLE_OK;
+        if (result != CURLE_OK) { return false; }
+        offset += sent;
+        if (sent == 0) {
+            network_api_curl_wait(socket, POLLIN, 100);
+            waited += 100;
+        }
+    }
+    return offset == sizeof(closeStatus);
 }
 
 static void network_api_ws_fail(struct NetworkWebSocket* ws, const char* message) {
