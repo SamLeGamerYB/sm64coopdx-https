@@ -1303,28 +1303,33 @@ static bool network_api_curl_ws_send_pong(struct NetworkWebSocket* ws, CURL* cur
     return true;
 }
 
-static bool network_api_curl_ws_send_close(CURL* curl, curl_socket_t socket) {
-    const unsigned char closeStatus[2] = { 0x03, 0xE8 };
+static bool network_api_curl_ws_send_close(CURL* curl, curl_socket_t socket,
+                                             const char* payload, size_t payloadLength) {
     size_t offset = 0;
+    bool emptyPending = payloadLength == 0;
     int waited = 0;
-    while (offset < sizeof(closeStatus) && waited < 5000) {
+    do {
         size_t sent = 0;
-        CURLcode result = sNetworkApiCurlWebSocketSend(curl, closeStatus + offset,
-                                                       sizeof(closeStatus) - offset, &sent,
-                                                       0, CURLWS_CLOSE);
+        CURLcode result = sNetworkApiCurlWebSocketSend(curl,
+                                                       payload != NULL ? payload + offset : "",
+                                                       payloadLength - offset, &sent, 0,
+                                                       CURLWS_CLOSE);
         if (result == CURLE_AGAIN) {
+            if (waited >= 5000) { return false; }
             network_api_curl_wait(socket, POLLOUT, 100);
             waited += 100;
             continue;
         }
         if (result != CURLE_OK) { return false; }
         offset += sent;
-        if (sent == 0) {
+        emptyPending = false;
+        if (sent == 0 && offset < payloadLength) {
+            if (waited >= 5000) { return false; }
             network_api_curl_wait(socket, POLLOUT, 100);
             waited += 100;
         }
-    }
-    return offset == sizeof(closeStatus);
+    } while (offset < payloadLength || emptyPending);
+    return offset == payloadLength;
 }
 
 static void network_api_ws_fail(struct NetworkWebSocket* ws, const char* message) {
@@ -1359,6 +1364,8 @@ static void* network_api_ws_worker(void* argument) {
     bool messageActive = false;
     bool connected = false;
     bool remoteClosed = false;
+    unsigned char closePayload[125] = { 0x03, 0xE8 };
+    size_t closePayloadLength = 2;
 
     if (network_api_ws_is_closing(ws)) { goto cleanup; }
     curl = curl_easy_init();
@@ -1451,6 +1458,15 @@ static void* network_api_ws_worker(void* argument) {
                 break;
             }
             if (metadata->flags & CURLWS_CLOSE) {
+                if (received > sizeof(closePayload) || metadata->bytesleft != 0 || received == 1) {
+                    network_api_ws_fail(ws, "WebSocket peer sent an invalid close frame");
+                    closePayload[0] = 0x03;
+                    closePayload[1] = 0xEA;
+                    closePayloadLength = 2;
+                } else {
+                    if (received > 0) { memcpy(closePayload, receiveBuffer, received); }
+                    closePayloadLength = received;
+                }
                 remoteClosed = true;
                 break;
             }
@@ -1512,7 +1528,7 @@ static void* network_api_ws_worker(void* argument) {
     }
 
     if (connected && !remoteClosed) {
-        network_api_curl_ws_send_close(curl, socket);
+        network_api_curl_ws_send_close(curl, socket, (const char*)closePayload, closePayloadLength);
         int waited = 0;
         while (waited < 5000) {
             if (!network_api_curl_wait(socket, POLLIN, 100)) { waited += 100; continue; }
@@ -1527,7 +1543,7 @@ static void* network_api_ws_worker(void* argument) {
             waited += 100;
         }
     } else if (connected && remoteClosed) {
-        network_api_curl_ws_send_close(curl, socket);
+        network_api_curl_ws_send_close(curl, socket, (const char*)closePayload, closePayloadLength);
     }
 
     network_api_ws_queue_event(ws, NETWORK_WS_EVENT_CLOSE, NULL, 0, false);
