@@ -720,6 +720,8 @@ BACKEND_LDFLAGS :=
 # to make WSS available without adding runtime dependencies to the game.
 ifeq ($(WINDOWS_BUILD),0)
   ifneq ($(strip $(CURL_PREFIX)),)
+    # The static libcurl build links OpenSSL; use its MD5 implementation too.
+    DEFINES += HAVE_OPENSSL
     BACKEND_CFLAGS += -I$(CURL_PREFIX)/include -DNETWORK_API_CURL_WS_STATIC=1
     ifeq ($(HOST_OS),Darwin)
       BACKEND_LDFLAGS += $(CURL_PREFIX)/lib/libcurl.a
