@@ -1934,32 +1934,30 @@ static bool network_api_get_host(const char* url, char* host, size_t hostSize) {
 }
 
 static void network_api_ensure_settings_files(void) {
-    const char* blacklistPath = fs_get_write_path(NETWORK_API_BLACKLIST_FILE);
-    const char* historyPath = fs_get_write_path(NETWORK_API_HISTORY_FILE);
-    if (blacklistPath != NULL) {
-        FILE* file = fopen(blacklistPath, "ab");
-        if (file != NULL) {
-            if (ftell(file) == 0) {
-                fputs("# One domain per line. Subdomains are blocked too.\n# Example: example.com\n", file);
-            }
-            fclose(file);
+    char blacklistPath[SYS_MAX_PATH];
+    char historyPath[SYS_MAX_PATH];
+    snprintf(blacklistPath, sizeof(blacklistPath), "%s", fs_get_write_path(NETWORK_API_BLACKLIST_FILE));
+    snprintf(historyPath, sizeof(historyPath), "%s", fs_get_write_path(NETWORK_API_HISTORY_FILE));
+    FILE* file = fopen(blacklistPath, "ab");
+    if (file != NULL) {
+        if (ftell(file) == 0) {
+            fputs("# One domain per line. Subdomains are blocked too.\n# Example: example.com\n", file);
         }
+        fclose(file);
     }
-    if (historyPath != NULL) {
-        FILE* file = fopen(historyPath, "ab");
-        if (file != NULL) fclose(file);
-    }
+    file = fopen(historyPath, "ab");
+    if (file != NULL) fclose(file);
 }
 
 static void network_api_log_access(const char* ownerPath, const char* url, const char* result) {
     network_api_ensure_settings_files();
     const char* path = fs_get_write_path(NETWORK_API_HISTORY_FILE);
     if (path == NULL) return;
+    pthread_mutex_lock(&sNetworkApiLogMutex);
     time_t now = time(NULL);
     struct tm* local = localtime(&now);
     char timestamp[32] = "unknown-time";
     if (local != NULL) strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", local);
-    pthread_mutex_lock(&sNetworkApiLogMutex);
     FILE* file = fopen(path, "ab");
     if (file != NULL) {
         fprintf(file, "%s | %s | %s | %s\n", timestamp,
