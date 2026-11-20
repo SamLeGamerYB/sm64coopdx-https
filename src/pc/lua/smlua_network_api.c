@@ -130,8 +130,9 @@ static unsigned int sNetworkWebSocketCount = 0;
 static unsigned int sNetworkWebSocketNextId = 1;
 #else
 static pthread_once_t sNetworkApiCurlInitOnce = PTHREAD_ONCE_INIT;
+static bool sNetworkApiCurlAvailable = false;
 static void network_api_curl_global_init(void) {
-    curl_global_init(CURL_GLOBAL_DEFAULT);
+    sNetworkApiCurlAvailable = curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
 }
 #endif
 
@@ -1341,7 +1342,7 @@ static int network_api_is_supported(lua_State* L) {
 #ifdef _WIN32
     lua_pushboolean(L, true);
 #else
-    lua_pushboolean(L, true);
+    lua_pushboolean(L, sNetworkApiCurlAvailable);
 #endif
     return 1;
 }
@@ -1395,6 +1396,13 @@ static int network_api_https_request(lua_State* L) {
         lua_pushstring(L, "This mod has not been granted network access");
         return 2;
     }
+#ifndef _WIN32
+    if (!sNetworkApiCurlAvailable) {
+        lua_pushnil(L);
+        lua_pushstring(L, "The libcurl HTTPS transport could not be initialized");
+        return 2;
+    }
+#endif
 
     if (sNetworkApiRequestCount >= NETWORK_API_MAX_REQUESTS) {
         lua_pushnil(L);
