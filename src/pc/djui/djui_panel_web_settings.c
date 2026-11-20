@@ -51,7 +51,7 @@ static void djui_panel_web_settings_history_create(struct DjuiBase* caller) {
             djui_text_create(body, lines[i]);
         }
     }
-    djui_button_create(body, DJUI_MENU_BACK, DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
     djui_panel_add(caller, panel, NULL);
 }
 
@@ -65,7 +65,7 @@ void djui_panel_web_settings_create(struct DjuiBase* caller) {
     djui_text_create(body, "One domain per line; # starts a comment.");
     djui_button_create(body, "Open user folder (blacklist file)", DJUI_BUTTON_STYLE_NORMAL, djui_panel_web_settings_open_folder);
     djui_button_create(body, "View web access history", DJUI_BUTTON_STYLE_NORMAL, djui_panel_web_settings_history_create);
-    djui_button_create(body, DJUI_MENU_BACK, DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
 
     djui_panel_add(caller, panel, NULL);
 }
