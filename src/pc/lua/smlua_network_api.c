@@ -1082,7 +1082,7 @@ static void network_api_ws_free(struct NetworkWebSocket* ws) {
 #if LIBCURL_VERSION_NUM >= 0x075600
 static bool network_api_load_websocket_functions(void) {
     const curl_version_info_data* info = curl_version_info(CURLVERSION_NOW);
-    if (info == NULL || info->protocols == NULL) { return false; }
+    if (!sNetworkApiCurlAvailable || info == NULL || info->protocols == NULL) { return false; }
     for (const char* const* protocol = info->protocols; *protocol != NULL; protocol++) {
         if (strcmp(*protocol, "wss") == 0) { return true; }
     }
@@ -1435,7 +1435,6 @@ static struct NetworkWebSocket* network_api_ws_find_locked(unsigned int id, cons
     }
     return NULL;
 }
-#endif
 
 static int network_api_websocket_connect(lua_State* L) {
     if ((lua_gettop(L) != 2 && lua_gettop(L) != 3) ||
@@ -1455,7 +1454,11 @@ static int network_api_websocket_connect(lua_State* L) {
     const char* url = lua_tolstring(L, 1, &urlLength);
     if (urlLength == 0 || urlLength > NETWORK_API_MAX_URL ||
         memchr(url, '\0', urlLength) != NULL || !network_api_valid_url_text(url) ||
-        !network_api_has_wss_prefix(url)) {
+        !network_api_has_wss_prefix(url)
+#ifndef _WIN32
+        || network_api_url_has_credentials(url)
+#endif
+        ) {
         lua_pushnil(L);
         lua_pushstring(L, "Only valid wss:// URLs up to 2048 bytes are accepted");
         return 2;
@@ -1740,13 +1743,6 @@ static int network_api_https_request(lua_State* L) {
         lua_pushstring(L, "This mod has not been granted network access");
         return 2;
     }
-#ifndef _WIN32
-    if (!sNetworkApiCurlAvailable) {
-        lua_pushnil(L);
-        lua_pushstring(L, "The libcurl HTTPS transport could not be initialized");
-        return 2;
-    }
-#endif
 #ifndef _WIN32
     if (!sNetworkApiCurlAvailable) {
         lua_pushnil(L);
