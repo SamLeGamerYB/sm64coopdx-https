@@ -1444,7 +1444,7 @@ static void* network_api_ws_worker(void* argument) {
             if (!network_api_curl_wait(socket, POLLIN, 100)) { waited += 100; continue; }
             size_t received = 0;
             const struct curl_ws_frame* metadata = NULL;
-            result = curl_ws_recv(curl, receiveBuffer, sizeof(receiveBuffer), &received, &metadata);
+            result = sNetworkApiCurlWebSocketReceive(curl, receiveBuffer, sizeof(receiveBuffer), &received, &metadata);
             if (result == CURLE_OK && metadata != NULL && (metadata->flags & CURLWS_CLOSE)) {
                 remoteClosed = true;
                 break;
