@@ -32,7 +32,6 @@ CONFIGURE_ARGS=(
   "--without-nghttp3"
   "--without-ngtcp2"
   "--without-libidn2"
-  "--without-librtmp"
   "--without-libgsasl"
   "--disable-ldap"
   "--disable-ldaps"
