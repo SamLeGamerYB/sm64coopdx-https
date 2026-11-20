@@ -68,6 +68,7 @@ struct NetworkHttpRequest {
     char* responseHeaders;
     char* responseBody;
     size_t responseBodyLength;
+    bool responseTooLarge;
     char error[256];
     struct NetworkHttpRequest* next;
 };
@@ -487,7 +488,10 @@ static size_t network_api_curl_write_body(char* data, size_t size, size_t count,
     struct NetworkHttpRequest* request = context;
     if (size != 0 && count > SIZE_MAX / size) { return 0; }
     size_t bytes = size * count;
-    if (bytes > NETWORK_API_MAX_BODY - request->responseBodyLength) { return 0; }
+    if (bytes > NETWORK_API_MAX_BODY - request->responseBodyLength) {
+        request->responseTooLarge = true;
+        return 0;
+    }
     char* expanded = realloc(request->responseBody, request->responseBodyLength + bytes);
     if (expanded == NULL && bytes > 0) { return 0; }
     request->responseBody = expanded;
@@ -607,7 +611,7 @@ static void* network_api_http_worker(void* argument) {
         }
     } else if (network_api_request_is_cancelled(request)) {
         network_api_set_error(request, "HTTPS request was cancelled");
-    } else if (result == CURLE_WRITE_ERROR && request->responseBodyLength >= NETWORK_API_MAX_BODY) {
+    } else if (request->responseTooLarge) {
         network_api_set_error(request, "HTTPS response exceeds the 1 MiB limit");
     } else if (errorBuffer[0] != '\0') {
         network_api_set_error(request, errorBuffer);
