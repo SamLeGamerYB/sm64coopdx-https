@@ -18,7 +18,7 @@ jobs:
             - name: Install dependencies
               run: |
                 sudo apt update
-                sudo apt install -y build-essential git python3 libglew-dev libsdl2-dev libz-dev libssl-dev curl zip
+                sudo apt install -y build-essential git python3 libglew-dev libsdl2-dev libz-dev libssl-dev pkg-config curl zip
 
             - name: Build static libcurl with WebSocket support
               run: |
@@ -56,7 +56,7 @@ jobs:
             - name: Install dependencies
               run: |
                 sudo apt update
-                sudo apt install -y build-essential git python3 libglew-dev libsdl2-dev libz-dev libssl-dev curl zip
+                sudo apt install -y build-essential git python3 libglew-dev libsdl2-dev libz-dev libssl-dev pkg-config curl zip
 
             - name: Build static libcurl with WebSocket support
               run: |
