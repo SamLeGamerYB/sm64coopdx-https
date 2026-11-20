@@ -73,11 +73,22 @@ if ! nm -g "$CURL_PREFIX/lib/libcurl.a" | grep 'curl_ws_send' >/dev/null ||
   exit 1
 fi
 
-OPENSSL_LIBDIR="$(dirname "$(find -L "$OPENSSL_PREFIX" -name libssl.a -print -quit)")"
-if [[ -z "$OPENSSL_LIBDIR" || ! -f "$OPENSSL_LIBDIR/libcrypto.a" ]]; then
-  echo "Static OpenSSL libraries were not found under $OPENSSL_PREFIX" >&2
+OPENSSL_LIBDIR=""
+for candidate in "$OPENSSL_PREFIX/lib" "$OPENSSL_PREFIX/lib64"; do
+  if [[ -f "$candidate/libssl.a" && -f "$candidate/libcrypto.a" ]]; then
+    OPENSSL_LIBDIR="$candidate"
+    break
+  fi
+done
+if [[ -z "$OPENSSL_LIBDIR" ]]; then
+  echo "Static OpenSSL libraries were not found in $OPENSSL_PREFIX/lib or lib64" >&2
   exit 1
 fi
+
+# Confirm the selected archives belong to the same OpenSSL installation used for headers.
+echo "Using OpenSSL headers from: $OPENSSL_PREFIX/include"
+echo "Using OpenSSL static libraries from: $OPENSSL_LIBDIR"
+
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   {
