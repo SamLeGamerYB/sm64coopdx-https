@@ -18,7 +18,7 @@ This file records repository-specific integration constraints and the current im
 - Windows CI uses MSYS2 MinGW (both 32-bit and 64-bit toolchains). WinHTTP is a Windows system library, but it must be explicitly linked with `-lwinhttp` if used.
 - Windows links WinINet, Winsock, and WinHTTP for the current HTTPS implementation.
 - New C sources in `src/pc/lua` are discovered automatically through `SRC_DIRS`.
-- Keep the Lua-facing API and lifecycle code platform-neutral. Isolate transport backends behind a small interface. WinHTTP includes and calls are currently isolated in the Windows-only backend.
+- Keep the Lua-facing API, permission checks, ownership, event queues, and lifecycle code platform-neutral. Isolate transport backends behind a small interface: WinHTTP on Windows and libcurl on Linux/SteamOS/macOS.
 - Transport support must be reported honestly per platform. A compile-only stub is not a functioning HTTPS/WebSocket implementation.
 
 ## Current native implementation status
@@ -32,9 +32,9 @@ This file records repository-specific integration constraints and the current im
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
 - When a mod file is hot-reloaded, the user revokes its network permission, the active mod set is replaced, or the local mod cache is refreshed, its pending HTTP requests are marked cancelled, its WebSockets are asked to close, and callbacks are discarded before old mod objects are freed. The worker checks the flag between synchronous WinHTTP operations; it never closes a handle while another thread is using it.
 - HTTPS is restricted to `https://`; WinHTTP redirects, automatic cookies, and ambient authentication are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
-- The transport is linked with WinHTTP on Windows. Other platforms currently return an explicit unsupported error.
-- A Windows-only WSS backend now dynamically loads the Windows 8+ WinHTTP WebSocket entry points, performs the upgrade handshake (including validated explicit headers), receives fragmented text/binary messages, queues outgoing text/binary messages, and dispatches `on_open`, `on_message`, `on_close`, and `on_error` callbacks on the game thread. It uses bounded message/event queues, a keep-alive interval, and a configured receive timeout. Actual idle and shutdown timing still needs runtime verification. It has not been build-tested.
-- Non-Windows transport backends are not implemented yet.
+- The Windows transport is linked with WinHTTP. Linux/SteamOS and macOS already link libcurl in the game build, but the network API does not yet use it; those platforms currently return an explicit unsupported error.
+- A Windows WSS backend dynamically loads the Windows 8+ WinHTTP WebSocket entry points and dispatches callbacks on the game thread. It has bounded message/event queues and has not been build-tested.
+- Linux/SteamOS and macOS require libcurl HTTPS and WebSocket backends. libcurl WebSocket support was added in 7.86.0; CI and runtime dependency strategy must be confirmed before enabling it.
 - No build or runtime tests have been executed in this environment. Do not describe this implementation as verified until CI/build tests pass.
 
 ## Required implementation invariants
@@ -60,7 +60,7 @@ This file records repository-specific integration constraints and the current im
 ## Verification checklist
 
 - Windows 32-bit and 64-bit compile/link.
-- Linux, SteamOS and both macOS CI targets compile with their selected transport backend or an explicit unsupported result.
+- Linux, SteamOS and both macOS CI targets compile and link the libcurl backend.
 - HTTPS success, HTTP error status, invalid URL, TLS failure, timeout, oversized response, and cancellation.
 - WebSocket connect, text/binary send and receive, remote close, local close, reconnect/error paths, oversized frame, and cancellation.
 - Mod disable/reload while requests are active.
