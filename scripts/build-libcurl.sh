@@ -68,6 +68,11 @@ if ! "$CURL_PREFIX/bin/curl-config" --features | grep -qx 'SSL'; then
   echo "The built libcurl does not include TLS support" >&2
   exit 1
 fi
+if ! nm -g "$CURL_PREFIX/lib/libcurl.a" | grep -q 'curl_ws_send' ||
+   ! nm -g "$CURL_PREFIX/lib/libcurl.a" | grep -q 'curl_ws_recv'; then
+  echo "The static libcurl archive does not export the WebSocket API" >&2
+  exit 1
+fi
 
 OPENSSL_LIBDIR="$(dirname "$(find "$OPENSSL_PREFIX" -name libssl.a -print -quit)")"
 if [[ -z "$OPENSSL_LIBDIR" || ! -f "$OPENSSL_LIBDIR/libcrypto.a" ]]; then
