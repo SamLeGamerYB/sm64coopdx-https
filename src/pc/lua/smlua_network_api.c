@@ -21,6 +21,7 @@
 #include <pthread.h>
 #ifndef _WIN32
 #include <poll.h>
+#include <dlfcn.h>
 #endif
 #include <ctype.h>
 #ifndef _WIN32
@@ -1080,13 +1081,40 @@ static void network_api_ws_free(struct NetworkWebSocket* ws) {
 #else
 
 #if LIBCURL_VERSION_NUM >= 0x075600
+typedef CURLcode (*NetworkApiCurlWebSocketSendFn)(CURL*, const void*, size_t,
+                                                        size_t*, curl_off_t, unsigned int);
+typedef CURLcode (*NetworkApiCurlWebSocketReceiveFn)(CURL*, void*, size_t, size_t*,
+                                                          const struct curl_ws_frame**);
+static NetworkApiCurlWebSocketSendFn sNetworkApiCurlWebSocketSend = NULL;
+static NetworkApiCurlWebSocketReceiveFn sNetworkApiCurlWebSocketReceive = NULL;
+static bool sNetworkApiCurlWebSocketFunctionsLoaded = false;
+static bool sNetworkApiCurlWebSocketFunctionsAvailable = false;
+
 static bool network_api_load_websocket_functions(void) {
+    if (sNetworkApiCurlWebSocketFunctionsLoaded) {
+        return sNetworkApiCurlWebSocketFunctionsAvailable;
+    }
+    sNetworkApiCurlWebSocketFunctionsLoaded = true;
     const curl_version_info_data* info = curl_version_info(CURLVERSION_NOW);
     if (!sNetworkApiCurlAvailable || info == NULL || info->protocols == NULL) { return false; }
+
+    bool wssProtocolAvailable = false;
     for (const char* const* protocol = info->protocols; *protocol != NULL; protocol++) {
-        if (strcmp(*protocol, "wss") == 0) { return true; }
+        if (strcmp(*protocol, "wss") == 0) { wssProtocolAvailable = true; break; }
     }
-    return false;
+    if (!wssProtocolAvailable) { return false; }
+
+    void* sendSymbol = dlsym(RTLD_DEFAULT, "curl_ws_send");
+    void* receiveSymbol = dlsym(RTLD_DEFAULT, "curl_ws_recv");
+    if (sendSymbol != NULL) {
+        memcpy(&sNetworkApiCurlWebSocketSend, &sendSymbol, sizeof(sendSymbol));
+    }
+    if (receiveSymbol != NULL) {
+        memcpy(&sNetworkApiCurlWebSocketReceive, &receiveSymbol, sizeof(receiveSymbol));
+    }
+    sNetworkApiCurlWebSocketFunctionsAvailable =
+        sNetworkApiCurlWebSocketSend != NULL && sNetworkApiCurlWebSocketReceive != NULL;
+    return sNetworkApiCurlWebSocketFunctionsAvailable;
 }
 #else
 static bool network_api_load_websocket_functions(void) {
@@ -1202,7 +1230,7 @@ static bool network_api_curl_ws_send_message(CURL* curl, curl_socket_t socket,
         do {
             size_t sent = 0;
             const char* data = message->payload != NULL ? message->payload + offset + frameOffset : "";
-            CURLcode result = curl_ws_send(curl, data + frameOffset, frameLength - frameOffset,
+            CURLcode result = sNetworkApiCurlWebSocketSend(curl, data + frameOffset, frameLength - frameOffset,
                                            &sent, 0, flags);
             if (result == CURLE_AGAIN) {
                 if (!network_api_curl_wait(socket, POLLOUT, 1000)) { continue; }
@@ -1330,7 +1358,7 @@ static void* network_api_ws_worker(void* argument) {
         for (;;) {
             size_t received = 0;
             const struct curl_ws_frame* metadata = NULL;
-            result = curl_ws_recv(curl, receiveBuffer, sizeof(receiveBuffer), &received, &metadata);
+            result = sNetworkApiCurlWebSocketReceive(curl, receiveBuffer, sizeof(receiveBuffer), &received, &metadata);
             if (result == CURLE_AGAIN) { break; }
             if (result == CURLE_GOT_NOTHING) {
                 remoteClosed = true;
