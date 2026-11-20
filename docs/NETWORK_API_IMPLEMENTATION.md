@@ -14,7 +14,7 @@ This file records repository-specific integration constraints and the current im
 ## Platform and build constraints
 
 - The repository's CI workflow builds Windows, Linux, SteamOS, macOS ARM and macOS Intel. Its pull-request trigger targets `dev`, not `main`; a feature branch alone does not trigger that PR build.
-- Linux/SteamOS CI installs and links libcurl. macOS builds use the system/Homebrew curl libraries through the existing linker configuration.
+- Linux/SteamOS and both macOS CI targets build a pinned static libcurl 8.23.0 with `--enable-websockets`, plus static OpenSSL, so the game does not gain a runtime libcurl/OpenSSL dependency. Local Unix builds may use the system libcurl and must report WSS unavailable when its WebSocket support is absent.
 - Windows CI uses MSYS2 MinGW (both 32-bit and 64-bit toolchains). WinHTTP is a Windows system library, but it must be explicitly linked with `-lwinhttp` if used.
 - Windows links WinINet, Winsock, and WinHTTP for the current HTTPS implementation.
 - New C sources in `src/pc/lua` are discovered automatically through `SRC_DIRS`.
@@ -32,8 +32,8 @@ This file records repository-specific integration constraints and the current im
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
 - When a mod file is hot-reloaded, the user revokes its network permission, the active mod set is replaced, or the local mod cache is refreshed, its pending HTTP requests are marked cancelled, its WebSockets are asked to close, and callbacks are discarded before old mod objects are freed. The worker checks the flag between synchronous WinHTTP operations; it never closes a handle while another thread is using it.
 - HTTPS is restricted to `https://`; WinHTTP redirects, automatic cookies, and ambient authentication are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
-- The Windows transport is linked with WinHTTP. Linux/SteamOS and macOS already link libcurl in the game build, but the network API does not yet use it; those platforms currently return an explicit unsupported error.
-- The Windows WSS backend dynamically loads the Windows 8+ WinHTTP WebSocket entry points. Linux/SteamOS and macOS now use libcurl's optional WebSocket API (introduced in 7.86.0) with a single worker loop, bounded queues, fragmented-message assembly, and main-thread callback dispatch. The upstream API remains experimental and is dynamically checked at runtime; a build without its WSS protocol or exported symbols reports WebSocket support as unavailable. Neither the new libcurl backend nor the existing Windows backend has been build/runtime-tested in this environment.
+- Windows HTTPS/WSS use WinHTTP. Linux/SteamOS and macOS use the libcurl backend. CI builds a static WSS-enabled libcurl and OpenSSL; local builds without a supplied `CURL_PREFIX` use the system libcurl and can expose HTTPS while reporting WSS unavailable.
+- The Windows WSS backend dynamically loads the Windows 8+ WinHTTP WebSocket entry points. Linux/SteamOS and macOS use libcurl's optional WebSocket API (introduced in 7.86.0) with a single worker loop, bounded queues, fragmented-message assembly, control-frame handling, and main-thread callback dispatch. The upstream API remains experimental; the CI-specific static build enables it explicitly, while local builds check runtime protocol and symbol availability. Neither the new libcurl backend nor the existing Windows backend has been build/runtime-tested in this environment.
 - No build or runtime tests have been executed in this environment. Do not describe this implementation as verified until CI/build tests pass.
 
 ## Required implementation invariants
@@ -59,7 +59,7 @@ This file records repository-specific integration constraints and the current im
 ## Verification checklist
 
 - Windows 32-bit and 64-bit compile/link.
-- Linux, SteamOS and both macOS CI targets compile and link the libcurl backend (including the libcurl WebSocket API).
+- Linux, SteamOS and both macOS CI targets build and statically link the pinned WSS-enabled libcurl/OpenSSL backend.
 - HTTPS success, HTTP error status, invalid URL, TLS failure, timeout, oversized response, and cancellation.
 - WebSocket connect, text/binary send and receive, remote close, local close, reconnect/error paths, oversized frame, and cancellation.
 - Mod disable/reload while requests are active.
