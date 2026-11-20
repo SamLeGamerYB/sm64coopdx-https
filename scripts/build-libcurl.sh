@@ -73,7 +73,7 @@ if ! nm -g "$CURL_PREFIX/lib/libcurl.a" | grep 'curl_ws_send' >/dev/null ||
   exit 1
 fi
 
-OPENSSL_LIBDIR="$(dirname "$(find "$OPENSSL_PREFIX" -name libssl.a -print -quit)")"
+OPENSSL_LIBDIR="$(dirname "$(find -L "$OPENSSL_PREFIX" -name libssl.a -print -quit)")"
 if [[ -z "$OPENSSL_LIBDIR" || ! -f "$OPENSSL_LIBDIR/libcrypto.a" ]]; then
   echo "Static OpenSSL libraries were not found under $OPENSSL_PREFIX" >&2
   exit 1
