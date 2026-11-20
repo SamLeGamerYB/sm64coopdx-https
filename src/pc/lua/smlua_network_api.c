@@ -21,6 +21,7 @@
 #include <pthread.h>
 #include <ctype.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -166,6 +167,17 @@ static bool network_api_valid_url_text(const char* value) {
     }
     return true;
 }
+
+#ifndef _WIN32
+static bool network_api_url_has_credentials(const char* value) {
+    const char* separator = strstr(value, "://");
+    if (separator == NULL) { return true; }
+    const char* authority = separator + 3;
+    const char* end = strpbrk(authority, "/?#");
+    if (end == NULL) { end = authority + strlen(authority); }
+    return memchr(authority, '@', (size_t)(end - authority)) != NULL;
+}
+#endif
 
 static void network_api_free_request(struct NetworkHttpRequest* request) {
     if (request == NULL) { return; }
@@ -565,7 +577,11 @@ static void* network_api_http_worker(void* argument) {
 
     result = curl_easy_perform(curl);
     if (result == CURLE_OK) {
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &request->statusCode);
+        long responseCode = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
+        if (responseCode > 0 && (unsigned long)responseCode <= UINT_MAX) {
+            request->statusCode = (unsigned int)responseCode;
+        }
     } else if (network_api_request_is_cancelled(request)) {
         network_api_set_error(request, "HTTPS request was cancelled");
     } else if (result == CURLE_WRITE_ERROR && request->responseBodyLength >= NETWORK_API_MAX_BODY) {
@@ -1397,7 +1413,11 @@ static int network_api_https_request(lua_State* L) {
     const char* url = lua_tolstring(L, -1, &urlLength);
     if (urlLength == 0 || urlLength > NETWORK_API_MAX_URL ||
         memchr(url, '\0', urlLength) != NULL || !network_api_valid_url_text(url) ||
-        !network_api_has_https_prefix(url)) {
+        !network_api_has_https_prefix(url)
+#ifndef _WIN32
+        || network_api_url_has_credentials(url)
+#endif
+        ) {
         lua_pop(L, 1);
         lua_pushnil(L);
         lua_pushstring(L, "Only valid https:// URLs up to 2048 bytes are accepted");
