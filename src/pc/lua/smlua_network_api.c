@@ -1104,14 +1104,10 @@ static bool network_api_load_websocket_functions(void) {
     }
     if (!wssProtocolAvailable) { return false; }
 
-    void* sendSymbol = dlsym(RTLD_DEFAULT, "curl_ws_send");
-    void* receiveSymbol = dlsym(RTLD_DEFAULT, "curl_ws_recv");
-    if (sendSymbol != NULL) {
-        memcpy(&sNetworkApiCurlWebSocketSend, &sendSymbol, sizeof(sendSymbol));
-    }
-    if (receiveSymbol != NULL) {
-        memcpy(&sNetworkApiCurlWebSocketReceive, &receiveSymbol, sizeof(receiveSymbol));
-    }
+    sNetworkApiCurlWebSocketSend =
+        (NetworkApiCurlWebSocketSendFn)dlsym(RTLD_DEFAULT, "curl_ws_send");
+    sNetworkApiCurlWebSocketReceive =
+        (NetworkApiCurlWebSocketReceiveFn)dlsym(RTLD_DEFAULT, "curl_ws_recv");
     sNetworkApiCurlWebSocketFunctionsAvailable =
         sNetworkApiCurlWebSocketSend != NULL && sNetworkApiCurlWebSocketReceive != NULL;
     return sNetworkApiCurlWebSocketFunctionsAvailable;
@@ -1272,6 +1268,16 @@ static void network_api_ws_fail(struct NetworkWebSocket* ws, const char* message
     pthread_mutex_unlock(&sNetworkApiMutex);
 }
 
+static int network_api_curl_ws_progress(void* context, curl_off_t downloadTotal,
+                                        curl_off_t downloadNow, curl_off_t uploadTotal,
+                                        curl_off_t uploadNow) {
+    UNUSED downloadTotal;
+    UNUSED downloadNow;
+    UNUSED uploadTotal;
+    UNUSED uploadNow;
+    return network_api_ws_is_closing(context) ? 1 : 0;
+}
+
 static void* network_api_ws_worker(void* argument) {
     struct NetworkWebSocket* ws = argument;
     CURL* curl = NULL;
@@ -1308,6 +1314,9 @@ static void* network_api_ws_worker(void* argument) {
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, network_api_curl_ws_progress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, ws);
 #if LIBCURL_VERSION_NUM >= 0x075500
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "wss");
 #else
@@ -1316,7 +1325,9 @@ static void* network_api_ws_worker(void* argument) {
 
     CURLcode result = curl_easy_perform(curl);
     if (result != CURLE_OK) {
-        network_api_ws_set_error(ws, errorBuffer[0] != '\0' ? errorBuffer : curl_easy_strerror(result));
+        if (!network_api_ws_is_closing(ws)) {
+            network_api_ws_set_error(ws, errorBuffer[0] != '\0' ? errorBuffer : curl_easy_strerror(result));
+        }
         goto cleanup;
     }
     if (curl_easy_getinfo(curl, CURLINFO_ACTIVESOCKET, &socket) != CURLE_OK ||
