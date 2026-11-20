@@ -25,6 +25,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#ifndef _WIN32
+#include <curl/curl.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -128,7 +131,6 @@ static unsigned int sNetworkWebSocketNextId = 1;
 static unsigned int sNetworkApiRequestCount = 0;
 #endif
 
-#ifdef _WIN32
 static bool network_api_has_https_prefix(const char* url) {
     static const char prefix[] = "https://";
     if (strlen(url) < sizeof(prefix) - 1) { return false; }
@@ -182,8 +184,6 @@ static struct Mod* network_api_find_active_mod(const char* relativePath) {
     }
     return NULL;
 }
-
-#endif
 
 #ifdef _WIN32
 static wchar_t* network_api_utf8_to_wide(const char* value) {
@@ -432,7 +432,157 @@ cleanup:
     pthread_mutex_unlock(&sNetworkApiMutex);
     return NULL;
 }
+
+#else
+static void network_api_set_error(struct NetworkHttpRequest* request, const char* message) {
+    snprintf(request->error, sizeof(request->error), "%s", message);
+}
+
+static bool network_api_request_is_cancelled(struct NetworkHttpRequest* request) {
+    pthread_mutex_lock(&sNetworkApiMutex);
+    bool cancelled = request->cancelled;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    return cancelled;
+}
+
+static size_t network_api_curl_write_body(char* data, size_t size, size_t count, void* context) {
+    struct NetworkHttpRequest* request = context;
+    if (size != 0 && count > SIZE_MAX / size) { return 0; }
+    size_t bytes = size * count;
+    if (bytes > NETWORK_API_MAX_BODY - request->responseBodyLength) { return 0; }
+    char* expanded = realloc(request->responseBody, request->responseBodyLength + bytes);
+    if (expanded == NULL && bytes > 0) { return 0; }
+    request->responseBody = expanded;
+    if (bytes > 0) {
+        memcpy(request->responseBody + request->responseBodyLength, data, bytes);
+        request->responseBodyLength += bytes;
+    }
+    return bytes;
+}
+
+static size_t network_api_curl_write_headers(char* data, size_t size, size_t count, void* context) {
+    struct NetworkHttpRequest* request = context;
+    if (size != 0 && count > SIZE_MAX / size) { return 0; }
+    size_t bytes = size * count;
+    const size_t maxHeaders = 65536;
+    size_t current = request->responseHeaders != NULL ? strlen(request->responseHeaders) : 0;
+    if (bytes > maxHeaders - current) { return 0; }
+    char* expanded = realloc(request->responseHeaders, current + bytes + 1);
+    if (expanded == NULL) { return 0; }
+    request->responseHeaders = expanded;
+    memcpy(request->responseHeaders + current, data, bytes);
+    request->responseHeaders[current + bytes] = '\0';
+    return bytes;
+}
+
+static int network_api_curl_progress(void* context, curl_off_t downloadTotal,
+                                     curl_off_t downloadNow, curl_off_t uploadTotal,
+                                     curl_off_t uploadNow) {
+    UNUSED downloadTotal;
+    UNUSED downloadNow;
+    UNUSED uploadTotal;
+    UNUSED uploadNow;
+    return network_api_request_is_cancelled(context) ? 1 : 0;
+}
+
+static struct curl_slist* network_api_curl_headers(const char* rawHeaders) {
+    struct curl_slist* headers = NULL;
+    if (rawHeaders == NULL) { return NULL; }
+    const char* line = rawHeaders;
+    while (*line != '\0') {
+        const char* end = strstr(line, "\r\n");
+        size_t length = end != NULL ? (size_t)(end - line) : strlen(line);
+        if (length == 0) { break; }
+        char* value = malloc(length + 1);
+        if (value == NULL) { curl_slist_free_all(headers); return NULL; }
+        memcpy(value, line, length);
+        value[length] = '\0';
+        struct curl_slist* next = curl_slist_append(headers, value);
+        free(value);
+        if (next == NULL) { curl_slist_free_all(headers); return NULL; }
+        headers = next;
+        if (end == NULL) { break; }
+        line = end + 2;
+    }
+    return headers;
+}
+
+static void* network_api_http_worker(void* argument) {
+    struct NetworkHttpRequest* request = argument;
+    CURL* curl = NULL;
+    struct curl_slist* headers = NULL;
+    CURLcode result = CURLE_FAILED_INIT;
+    char errorBuffer[CURL_ERROR_SIZE] = {0};
+
+    if (network_api_request_is_cancelled(request)) {
+        network_api_set_error(request, "HTTPS request was cancelled");
+        goto cleanup;
+    }
+
+    curl = curl_easy_init();
+    if (curl == NULL) {
+        network_api_set_error(request, "Could not initialize libcurl");
+        goto cleanup;
+    }
+    headers = network_api_curl_headers(request->headers);
+    if (request->headers != NULL && request->headers[0] != '\0' && headers == NULL) {
+        network_api_set_error(request, "Could not allocate request headers");
+        goto cleanup;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, request->url);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, request->method);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 5000L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 30000L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, network_api_curl_write_body);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, request);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, network_api_curl_write_headers);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, request);
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, network_api_curl_progress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, request);
+#if LIBCURL_VERSION_NUM >= 0x075500
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https");
+#else
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
 #endif
+    if (headers != NULL) {
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    }
+    if (request->bodyLength > 0) {
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request->body);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)request->bodyLength);
+    }
+
+    result = curl_easy_perform(curl);
+    if (result == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &request->statusCode);
+    } else if (network_api_request_is_cancelled(request)) {
+        network_api_set_error(request, "HTTPS request was cancelled");
+    } else if (result == CURLE_WRITE_ERROR && request->responseBodyLength >= NETWORK_API_MAX_BODY) {
+        network_api_set_error(request, "HTTPS response exceeds the 1 MiB limit");
+    } else if (errorBuffer[0] != '\0') {
+        network_api_set_error(request, errorBuffer);
+    } else {
+        network_api_set_error(request, curl_easy_strerror(result));
+    }
+
+cleanup:
+    if (headers != NULL) { curl_slist_free_all(headers); }
+    if (curl != NULL) { curl_easy_cleanup(curl); }
+    pthread_mutex_lock(&sNetworkApiMutex);
+    request->complete = true;
+    pthread_mutex_unlock(&sNetworkApiMutex);
+    return NULL;
+}
+#endif
+
 
 
 #ifdef _WIN32
@@ -1172,7 +1322,7 @@ static int network_api_is_supported(lua_State* L) {
 #ifdef _WIN32
     lua_pushboolean(L, true);
 #else
-    lua_pushboolean(L, false);
+    lua_pushboolean(L, true);
 #endif
     return 1;
 }
@@ -1211,9 +1361,6 @@ static int network_api_cancel_request(lua_State* L) {
     }
     pthread_mutex_unlock(&sNetworkApiMutex);
     lua_pushboolean(L, found);
-#else
-    lua_pushboolean(L, false);
-#endif
     return 1;
 }
 
@@ -1231,11 +1378,6 @@ static int network_api_https_request(lua_State* L) {
         return 2;
     }
 
-#ifndef _WIN32
-    lua_pushnil(L);
-    lua_pushstring(L, "HTTPS transport is currently supported on Windows only");
-    return 2;
-#else
     if (sNetworkApiRequestCount >= NETWORK_API_MAX_REQUESTS) {
         lua_pushnil(L);
         lua_pushstring(L, "Too many active network requests");
@@ -1426,10 +1568,14 @@ static int network_api_https_request(lua_State* L) {
     request->threadStarted = true;
     lua_pushinteger(L, request->id);
     return 1;
-#endif
 }
 
 void smlua_network_api_bind(lua_State* L) {
+#ifndef _WIN32
+    static pthread_once_t curlInitOnce = PTHREAD_ONCE_INIT;
+    void network_api_curl_global_init(void);
+    pthread_once(&curlInitOnce, network_api_curl_global_init);
+#endif
     lua_getglobal(L, "network");
     if (lua_type(L, -1) != LUA_TTABLE) {
         lua_pop(L, 1);
@@ -1455,7 +1601,6 @@ void smlua_network_api_bind(lua_State* L) {
 }
 
 void smlua_network_api_discard_mod_requests(const char* relativePath) {
-#ifdef _WIN32
     if (relativePath == NULL) { return; }
     pthread_mutex_lock(&sNetworkApiMutex);
     for (struct NetworkHttpRequest* request = sNetworkApiRequests; request != NULL; request = request->next) {
@@ -1463,6 +1608,7 @@ void smlua_network_api_discard_mod_requests(const char* relativePath) {
             request->cancelled = true;
         }
     }
+#ifdef _WIN32
     for (struct NetworkWebSocket* ws = sNetworkWebSockets; ws != NULL; ws = ws->next) {
         if (strcmp(ws->ownerPath, relativePath) == 0) {
             ws->callbacksSuppressed = true;
@@ -1470,10 +1616,8 @@ void smlua_network_api_discard_mod_requests(const char* relativePath) {
             pthread_cond_broadcast(&ws->condition);
         }
     }
-    pthread_mutex_unlock(&sNetworkApiMutex);
-#else
-    UNUSED relativePath;
 #endif
+    pthread_mutex_unlock(&sNetworkApiMutex);
 }
 
 
@@ -1558,7 +1702,6 @@ static void network_api_ws_update(lua_State* L) {
 #endif
 
 void smlua_network_api_update(lua_State* L) {
-#ifdef _WIN32
     unsigned int processed = 0;
     while (processed < NETWORK_API_MAX_REQUESTS) {
         struct NetworkHttpRequest* completed = NULL;
@@ -1604,14 +1747,12 @@ void smlua_network_api_update(lua_State* L) {
         luaL_unref(L, LUA_REGISTRYINDEX, completed->callbackRef);
         network_api_free_request(completed);
     }
+#ifdef _WIN32
     network_api_ws_update(L);
-#else
-    UNUSED L;
 #endif
 }
 
 void smlua_network_api_shutdown(lua_State* L) {
-#ifdef _WIN32
     pthread_mutex_lock(&sNetworkApiMutex);
     struct NetworkHttpRequest* requests = sNetworkApiRequests;
     sNetworkApiRequests = NULL;
@@ -1630,6 +1771,7 @@ void smlua_network_api_shutdown(lua_State* L) {
         requests = next;
     }
 
+#ifdef _WIN32
     pthread_mutex_lock(&sNetworkApiMutex);
     struct NetworkWebSocket* sockets = sNetworkWebSockets;
     sNetworkWebSockets = NULL;
@@ -1654,8 +1796,6 @@ void smlua_network_api_shutdown(lua_State* L) {
         sockets = next;
     }
     sNetworkApiWebSocketCount = 0;
-#else
-    UNUSED L;
 #endif
     sNetworkApiRequestCount = 0;
 }
