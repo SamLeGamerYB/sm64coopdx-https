@@ -147,7 +147,7 @@ static void network_api_curl_global_init(void) {
 
 static bool network_api_curl_has_protocol(const char* name) {
     if (!sNetworkApiCurlAvailable) { return false; }
-    const curl_version_info_data* info = curl_version_info(CURLVERSION_NOW);
+    const curl_version_info_data* info = curl_version_info(CURLVERSION_FIRST);
     if (info == NULL || info->protocols == NULL) { return false; }
     for (const char* const* protocol = info->protocols; *protocol != NULL; protocol++) {
         if (strcmp(*protocol, name) == 0) { return true; }
