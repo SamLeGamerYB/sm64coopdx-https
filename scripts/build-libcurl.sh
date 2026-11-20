@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CURL_VERSION="${CURL_VERSION:-8.23.0}"
+CURL_VERSION="8.23.0"
 : "${CURL_PREFIX:?Set CURL_PREFIX to the install prefix for the static libcurl build}"
 : "${OPENSSL_PREFIX:?Set OPENSSL_PREFIX to the OpenSSL installation prefix}"
 
