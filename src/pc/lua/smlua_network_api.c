@@ -1243,7 +1243,7 @@ static bool network_api_curl_ws_send_message(CURL* curl, curl_socket_t socket,
             if (result != CURLE_OK) { return false; }
             frameOffset += sent;
             if (sent == 0 && frameOffset < frameLength) {
-                network_api_curl_wait(socket, POLLIN, 1000);
+                network_api_curl_wait(socket, POLLOUT, 1000);
             }
         } while (frameOffset < frameLength);
         offset += frameLength;
@@ -1269,7 +1269,7 @@ static bool network_api_curl_ws_send_close(CURL* curl, curl_socket_t socket) {
         if (result != CURLE_OK) { return false; }
         offset += sent;
         if (sent == 0) {
-            network_api_curl_wait(socket, POLLIN, 100);
+            network_api_curl_wait(socket, POLLOUT, 100);
             waited += 100;
         }
     }
