@@ -1273,6 +1273,36 @@ static bool network_api_curl_ws_send_message(struct NetworkWebSocket* ws, CURL* 
     return true;
 }
 
+static bool network_api_curl_ws_send_pong(struct NetworkWebSocket* ws, CURL* curl,
+                                             curl_socket_t socket, const char* payload,
+                                             size_t payloadLength) {
+    size_t offset = 0;
+    bool emptyPending = payloadLength == 0;
+    int waited = 0;
+    do {
+        size_t sent = 0;
+        CURLcode result = sNetworkApiCurlWebSocketSend(curl,
+                                                       payload != NULL ? payload + offset : "",
+                                                       payloadLength - offset, &sent, 0,
+                                                       CURLWS_PONG);
+        if (result == CURLE_AGAIN) {
+            if (network_api_ws_is_closing(ws) || waited >= 5000) { return false; }
+            network_api_curl_wait(socket, POLLOUT, 100);
+            waited += 100;
+            continue;
+        }
+        if (result != CURLE_OK) { return false; }
+        offset += sent;
+        emptyPending = false;
+        if (sent == 0 && offset < payloadLength) {
+            if (network_api_ws_is_closing(ws) || waited >= 5000) { return false; }
+            network_api_curl_wait(socket, POLLOUT, 100);
+            waited += 100;
+        }
+    } while (offset < payloadLength || emptyPending);
+    return true;
+}
+
 static bool network_api_curl_ws_send_close(CURL* curl, curl_socket_t socket) {
     const unsigned char closeStatus[2] = { 0x03, 0xE8 };
     size_t offset = 0;
@@ -1424,7 +1454,16 @@ static void* network_api_ws_worker(void* argument) {
                 remoteClosed = true;
                 break;
             }
-            if (metadata->flags & (CURLWS_PING | CURLWS_PONG)) {
+            if (metadata->flags & CURLWS_PING) {
+                if (received > 125 ||
+                    !network_api_curl_ws_send_pong(ws, curl, socket, receiveBuffer, received)) {
+                    network_api_ws_fail(ws, "WebSocket ping response failed");
+                    remoteClosed = true;
+                    break;
+                }
+                continue;
+            }
+            if (metadata->flags & CURLWS_PONG) {
                 continue;
             }
             if ((metadata->flags & (CURLWS_TEXT | CURLWS_BINARY)) == 0 ||
