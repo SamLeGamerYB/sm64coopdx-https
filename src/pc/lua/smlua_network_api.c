@@ -1293,6 +1293,7 @@ static void* network_api_ws_worker(void* argument) {
     char* messageBuffer = NULL;
     size_t messageLength = 0;
     bool messageBinary = false;
+    bool messageActive = false;
     bool connected = false;
     bool remoteClosed = false;
 
@@ -1391,8 +1392,20 @@ static void* network_api_ws_worker(void* argument) {
             if (metadata->flags & (CURLWS_PING | CURLWS_PONG)) {
                 continue;
             }
-            if (messageLength == 0) {
-                messageBinary = (metadata->flags & CURLWS_BINARY) != 0;
+            if ((metadata->flags & (CURLWS_TEXT | CURLWS_BINARY)) == 0 ||
+                (metadata->flags & (CURLWS_TEXT | CURLWS_BINARY)) == (CURLWS_TEXT | CURLWS_BINARY)) {
+                network_api_ws_fail(ws, "WebSocket peer sent an invalid data-frame type");
+                remoteClosed = true;
+                break;
+            }
+            bool frameBinary = (metadata->flags & CURLWS_BINARY) != 0;
+            if (!messageActive) {
+                messageBinary = frameBinary;
+                messageActive = true;
+            } else if (messageBinary != frameBinary) {
+                network_api_ws_fail(ws, "WebSocket peer changed message type between fragments");
+                remoteClosed = true;
+                break;
             }
             if (received > NETWORK_WS_MAX_MESSAGE - messageLength) {
                 network_api_ws_fail(ws, "WebSocket message exceeds the 1 MiB limit");
@@ -1416,6 +1429,7 @@ static void* network_api_ws_worker(void* argument) {
                 free(messageBuffer);
                 messageBuffer = NULL;
                 messageLength = 0;
+                messageActive = false;
             }
             if (received == 0 && metadata->bytesleft == 0) { break; }
         }
