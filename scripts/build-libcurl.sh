@@ -56,6 +56,10 @@ cd "$SOURCE_DIR"
 make -j"$(getconf _NPROCESSORS_ONLN)"
 make install
 
+if [[ ! -f "$CURL_PREFIX/lib/libcurl.a" ]]; then
+  echo "The static libcurl archive was not installed" >&2
+  exit 1
+fi
 if ! "$CURL_PREFIX/bin/curl-config" --protocols | tr ' ' '\n' | grep -qx 'WSS'; then
   echo "The built libcurl does not advertise WSS support" >&2
   exit 1
