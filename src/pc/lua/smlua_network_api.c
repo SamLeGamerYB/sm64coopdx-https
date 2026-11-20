@@ -1951,8 +1951,8 @@ static void network_api_ensure_settings_files(void) {
 
 static void network_api_log_access(const char* ownerPath, const char* url, const char* result) {
     network_api_ensure_settings_files();
-    const char* path = fs_get_write_path(NETWORK_API_HISTORY_FILE);
-    if (path == NULL) return;
+    char path[SYS_MAX_PATH];
+    snprintf(path, sizeof(path), "%s", fs_get_write_path(NETWORK_API_HISTORY_FILE));
     pthread_mutex_lock(&sNetworkApiLogMutex);
     time_t now = time(NULL);
     struct tm* local = localtime(&now);
@@ -1972,8 +1972,8 @@ static bool network_api_domain_is_blocked(const char* url) {
     network_api_ensure_settings_files();
     char host[256];
     if (!network_api_get_host(url, host, sizeof(host))) return true;
-    const char* path = fs_get_write_path(NETWORK_API_BLACKLIST_FILE);
-    if (path == NULL) return false;
+    char path[SYS_MAX_PATH];
+    snprintf(path, sizeof(path), "%s", fs_get_write_path(NETWORK_API_BLACKLIST_FILE));
     FILE* file = fopen(path, "rb");
     if (file == NULL) return false;
     char line[512];
