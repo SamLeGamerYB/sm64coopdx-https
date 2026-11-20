@@ -2,6 +2,12 @@
 
 The native network API is general-purpose and can be used by any SM64CoopDX Lua mod. It is not tied to Twitch or to a specific game mode.
 
+## macOS verification without a local Mac
+
+A local Mac is not required to check that the project still compiles for macOS. The repository's GitHub Actions workflow already contains separate macOS build jobs for Apple Silicon (`macos-26`) and Intel (`macos-15-intel`). A push to `feature/websocket-api` whose commit message contains `[build]` requests the normal build matrix; the results and logs are available in the repository's Actions tab.
+
+These jobs validate compilation and linking of the game on the two macOS architectures. They do **not** exercise the Lua network API at runtime. In this branch, HTTPS and WSS transports are intentionally Windows-only, so macOS reports them as unsupported; a successful macOS build only verifies that the unsupported-platform code path remains buildable. Runtime testing of a future native macOS transport would still require a macOS machine or a hosted Mac session.
+
 ## Current status
 
 - **HTTPS:** implemented for Windows builds in the current feature branch; not yet build-tested.
