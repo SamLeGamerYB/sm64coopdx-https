@@ -1365,7 +1365,6 @@ static void* network_api_ws_worker(void* argument) {
             }
         }
 
-        if (!network_api_curl_wait(socket, POLLIN, 100)) { continue; }
         for (;;) {
             size_t received = 0;
             const struct curl_ws_frame* metadata = NULL;
@@ -1413,6 +1412,7 @@ static void* network_api_ws_worker(void* argument) {
             if (received == 0 && metadata->bytesleft == 0) { break; }
         }
         if (remoteClosed) { break; }
+        network_api_curl_wait(socket, POLLIN, 100);
     }
 
     if (connected && !remoteClosed) {
