@@ -2,17 +2,16 @@
 
 The native network API is general-purpose and can be used by any SM64CoopDX Lua mod. It is not tied to Twitch or to a specific game mode.
 
-## macOS verification without a local Mac
+## Supported platforms
 
-A local Mac is not required to check that the project still compiles for macOS. The repository's GitHub Actions workflow already contains separate macOS build jobs for Apple Silicon (`macos-26`) and Intel (`macos-15-intel`). A push to `feature/websocket-api` whose commit message contains `[build]` requests the normal build matrix; the results and logs are available in the repository's Actions tab.
+The intended target is all platforms on which SM64CoopDX itself is supported: Windows, Linux/SteamOS, and macOS (Apple Silicon and Intel). This is not a port of the game; it uses the existing platform builds.
 
-These jobs validate compilation and linking of the game on the two macOS architectures. They do **not** exercise the Lua network API at runtime. In this branch, HTTPS and WSS transports are intentionally Windows-only, so macOS reports them as unsupported; a successful macOS build only verifies that the unsupported-platform code path remains buildable. Runtime testing of a future native macOS transport would still require a macOS machine or a hosted Mac session.
+The Lua API and permission model stay the same on every platform. Native transports are platform-specific: WinHTTP on Windows and libcurl on Linux/macOS. HTTPS and secure WebSockets must be supported on all three targets before the API is considered complete. Plain HTTP and unencrypted WebSockets are never accepted.
 
 ## Current status
 
-- **HTTPS:** implemented for Windows builds in the current feature branch; not yet build-tested.
-- **WebSockets:** Windows WSS connect/send/receive/close code is now implemented in this branch; it has not yet been build-tested.
-- **Linux/macOS:** currently return an explicit unsupported result.
+- **Windows:** WinHTTP HTTPS and WSS implementations exist in this branch, but have not yet been build-tested.
+- **Linux/SteamOS and macOS:** cross-platform libcurl transports are still to be implemented; they currently return an explicit unsupported result.
 - **Permissions:** opt-in per local mod, disabled by default.
 
 ## Permission and capability checks
@@ -26,8 +25,8 @@ local wssSupported = network.websocket_is_supported()
 ```
 
 - `network.has_permission()` returns whether the calling mod has been explicitly allowed to access the network by the user.
-- `network.is_supported()` returns whether this build has a native transport. It currently returns true on Windows and false elsewhere.
-- `network.websocket_is_supported()` checks whether this Windows installation exposes the native WSS functions; it returns false on unsupported platforms or Windows versions.
+- `network.is_supported()` returns whether this build has a working HTTPS transport.
+- `network.websocket_is_supported()` returns whether this build has a working secure WebSocket transport. It must reflect runtime libcurl capabilities on Linux/macOS and WinHTTP capabilities on Windows.
 
 ## HTTPS requests
 
@@ -72,7 +71,7 @@ Only `https://` URLs are accepted. WinHTTP redirects, automatic cookies, and amb
 
 ## WebSockets
 
-Windows 8 or newer builds accept only `wss://` URLs. The connection is asynchronous and returns a numeric socket ID immediately. Callback functions are optional:
+All supported builds accept only `wss://` URLs once their native WebSocket backend is implemented. The connection is asynchronous and returns a numeric socket ID immediately. Callback functions are optional:
 
 ```lua
 local socketId, err = network.websocket_connect("wss://example.invalid/socket", {
@@ -141,5 +140,6 @@ end
 
 ## Remaining work
 
-- Implement a non-Windows transport backend or continue returning unsupported.
-- Build and test Windows 32-bit/64-bit and all supported non-Windows CI targets.
+- Implement libcurl HTTPS and WSS transports for Linux/SteamOS and macOS while preserving the existing Windows WinHTTP backend.
+- Confirm the minimum libcurl version needed for WebSocket support and ensure CI/runtime dependencies meet it.
+- Build and test Windows 32-bit/64-bit, Linux/SteamOS, and both macOS architectures.
