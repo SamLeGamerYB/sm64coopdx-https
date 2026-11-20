@@ -1403,6 +1403,13 @@ static int network_api_https_request(lua_State* L) {
         return 2;
     }
 #endif
+#ifndef _WIN32
+    if (!sNetworkApiCurlAvailable) {
+        lua_pushnil(L);
+        lua_pushstring(L, "The libcurl HTTPS transport could not be initialized");
+        return 2;
+    }
+#endif
 
     if (sNetworkApiRequestCount >= NETWORK_API_MAX_REQUESTS) {
         lua_pushnil(L);
