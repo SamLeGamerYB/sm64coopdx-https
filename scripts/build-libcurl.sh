@@ -74,14 +74,28 @@ if ! nm -g "$CURL_PREFIX/lib/libcurl.a" | grep 'curl_ws_send' >/dev/null ||
 fi
 
 OPENSSL_LIBDIR=""
-for candidate in "$OPENSSL_PREFIX/lib" "$OPENSSL_PREFIX/lib64"; do
+OPENSSL_LIB_CANDIDATES=(
+  "$OPENSSL_PREFIX/lib"
+  "$OPENSSL_PREFIX/lib64"
+)
+
+# Debian and Ubuntu install development archives in a multiarch directory.
+if command -v dpkg-architecture >/dev/null 2>&1; then
+  OPENSSL_MULTIARCH="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)"
+  if [[ -n "$OPENSSL_MULTIARCH" ]]; then
+    OPENSSL_LIB_CANDIDATES+=("$OPENSSL_PREFIX/lib/$OPENSSL_MULTIARCH")
+  fi
+fi
+
+for candidate in "${OPENSSL_LIB_CANDIDATES[@]}"; do
   if [[ -f "$candidate/libssl.a" && -f "$candidate/libcrypto.a" ]]; then
     OPENSSL_LIBDIR="$candidate"
     break
   fi
 done
 if [[ -z "$OPENSSL_LIBDIR" ]]; then
-  echo "Static OpenSSL libraries were not found in $OPENSSL_PREFIX/lib or lib64" >&2
+  echo "Static OpenSSL libraries were not found under $OPENSSL_PREFIX" >&2
+  printf 'Checked: %s\\n' "${OPENSSL_LIB_CANDIDATES[@]}" >&2
   exit 1
 fi
 
