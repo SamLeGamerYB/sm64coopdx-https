@@ -1224,10 +1224,14 @@ static bool network_api_curl_ws_send_close(CURL* curl, curl_socket_t socket) {
     const unsigned char closeStatus[2] = { 0x03, 0xE8 };
     size_t sent = 0;
     CURLcode result;
+    int waited = 0;
     do {
         result = curl_ws_send(curl, closeStatus, sizeof(closeStatus), &sent, 0, CURLWS_CLOSE);
-        if (result == CURLE_AGAIN) { network_api_curl_wait(socket, POLLOUT, 100); }
-    } while (result == CURLE_AGAIN);
+        if (result == CURLE_AGAIN) {
+            network_api_curl_wait(socket, POLLOUT, 100);
+            waited += 100;
+        }
+    } while (result == CURLE_AGAIN && waited < 5000);
     return result == CURLE_OK;
 }
 
@@ -1391,17 +1395,19 @@ static void* network_api_ws_worker(void* argument) {
         network_api_curl_ws_send_close(curl, socket);
     }
 
-    network_api_ws_free_messages(ws);
     network_api_ws_queue_event(ws, NETWORK_WS_EVENT_CLOSE, NULL, 0, false);
 
 cleanup:
     free(messageBuffer);
+    pthread_mutex_lock(&sNetworkApiMutex);
+    ws->closeRequested = true;
+    ws->connected = false;
+    ws->complete = true;
+    pthread_cond_broadcast(&ws->condition);
+    pthread_mutex_unlock(&sNetworkApiMutex);
     network_api_ws_free_messages(ws);
     if (headers != NULL) { curl_slist_free_all(headers); }
     if (curl != NULL) { curl_easy_cleanup(curl); }
-    pthread_mutex_lock(&sNetworkApiMutex);
-    ws->complete = true;
-    pthread_mutex_unlock(&sNetworkApiMutex);
     return NULL;
 }
 #else
