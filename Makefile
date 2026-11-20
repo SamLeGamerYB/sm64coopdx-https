@@ -725,6 +725,7 @@ ifeq ($(WINDOWS_BUILD),0)
       BACKEND_LDFLAGS += $(CURL_PREFIX)/lib/libcurl.a
       BACKEND_LDFLAGS += -Wl,-force_load,$(OPENSSL_LIBDIR)/libssl.a
       BACKEND_LDFLAGS += -Wl,-force_load,$(OPENSSL_LIBDIR)/libcrypto.a -lz -pthread
+      BACKEND_LDFLAGS += -framework Security -framework CoreFoundation -framework SystemConfiguration
     else
       BACKEND_LDFLAGS += $(CURL_PREFIX)/lib/libcurl.a
       BACKEND_LDFLAGS += $(OPENSSL_LIBDIR)/libssl.a $(OPENSSL_LIBDIR)/libcrypto.a -lz -ldl -pthread
