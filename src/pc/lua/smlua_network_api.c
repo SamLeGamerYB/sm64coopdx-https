@@ -144,6 +144,16 @@ static bool sNetworkApiCurlAvailable = false;
 static void network_api_curl_global_init(void) {
     sNetworkApiCurlAvailable = curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
 }
+
+static bool network_api_curl_has_protocol(const char* name) {
+    if (!sNetworkApiCurlAvailable) { return false; }
+    const curl_version_info_data* info = curl_version_info(CURLVERSION_NOW);
+    if (info == NULL || info->protocols == NULL) { return false; }
+    for (const char* const* protocol = info->protocols; *protocol != NULL; protocol++) {
+        if (strcmp(*protocol, name) == 0) { return true; }
+    }
+    return false;
+}
 #endif
 
 static bool network_api_has_https_prefix(const char* url) {
@@ -1095,14 +1105,7 @@ static bool network_api_load_websocket_functions(void) {
         return sNetworkApiCurlWebSocketFunctionsAvailable;
     }
     sNetworkApiCurlWebSocketFunctionsLoaded = true;
-    const curl_version_info_data* info = curl_version_info(CURLVERSION_NOW);
-    if (!sNetworkApiCurlAvailable || info == NULL || info->protocols == NULL) { return false; }
-
-    bool wssProtocolAvailable = false;
-    for (const char* const* protocol = info->protocols; *protocol != NULL; protocol++) {
-        if (strcmp(*protocol, "wss") == 0) { wssProtocolAvailable = true; break; }
-    }
-    if (!wssProtocolAvailable) { return false; }
+    if (!network_api_curl_has_protocol("wss")) { return false; }
 
 #ifdef NETWORK_API_CURL_WS_STATIC
     sNetworkApiCurlWebSocketSend = curl_ws_send;
@@ -1769,7 +1772,7 @@ static int network_api_is_supported(lua_State* L) {
 #ifdef _WIN32
     lua_pushboolean(L, true);
 #else
-    lua_pushboolean(L, sNetworkApiCurlAvailable);
+    lua_pushboolean(L, network_api_curl_has_protocol("https"));
 #endif
     return 1;
 }
@@ -1820,9 +1823,9 @@ static int network_api_https_request(lua_State* L) {
         return 2;
     }
 #ifndef _WIN32
-    if (!sNetworkApiCurlAvailable) {
+    if (!network_api_curl_has_protocol("https")) {
         lua_pushnil(L);
-        lua_pushstring(L, "The libcurl HTTPS transport could not be initialized");
+        lua_pushstring(L, "The libcurl build does not provide HTTPS support");
         return 2;
     }
 #endif
