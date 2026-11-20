@@ -60,16 +60,16 @@ if [[ ! -f "$CURL_PREFIX/lib/libcurl.a" ]]; then
   echo "The static libcurl archive was not installed" >&2
   exit 1
 fi
-if ! "$CURL_PREFIX/bin/curl-config" --protocols | tr ' ' '\n' | grep -qx 'WSS'; then
+if ! "$CURL_PREFIX/bin/curl-config" --protocols | tr ' ' '\n' | grep -x 'WSS' >/dev/null; then
   echo "The built libcurl does not advertise WSS support" >&2
   exit 1
 fi
-if ! "$CURL_PREFIX/bin/curl-config" --features | grep -qx 'SSL'; then
+if ! "$CURL_PREFIX/bin/curl-config" --features | grep -x 'SSL' >/dev/null; then
   echo "The built libcurl does not include TLS support" >&2
   exit 1
 fi
-if ! nm -g "$CURL_PREFIX/lib/libcurl.a" | grep -q 'curl_ws_send' ||
-   ! nm -g "$CURL_PREFIX/lib/libcurl.a" | grep -q 'curl_ws_recv'; then
+if ! nm -g "$CURL_PREFIX/lib/libcurl.a" | grep 'curl_ws_send' >/dev/null ||
+   ! nm -g "$CURL_PREFIX/lib/libcurl.a" | grep 'curl_ws_recv' >/dev/null; then
   echo "The static libcurl archive does not export the WebSocket API" >&2
   exit 1
 fi
