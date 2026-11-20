@@ -737,6 +737,24 @@ extern "C" HWND gfx_dxgi_get_h_wnd(void) {
     return dxgi.h_wnd;
 }
 
+// Read the cursor in the same per-monitor DPI context used to create the DXGI window.
+// Without this, GetCursorPos/ScreenToClient can be virtualized differently from
+// the window's client coordinates and the in-game cursor drifts away from Windows.
+extern "C" bool gfx_dxgi_get_cursor_pos_client(POINT* point) {
+    if (point == nullptr || dxgi.h_wnd == nullptr) { return false; }
+    bool valid = false;
+    run_as_dpi_aware([&] () {
+        POINT cursor;
+        if (!GetCursorPos(&cursor)) { return; }
+        HWND hwnd_under = WindowFromPoint(cursor);
+        if (hwnd_under != dxgi.h_wnd && !IsChild(dxgi.h_wnd, hwnd_under)) { return; }
+        if (!ScreenToClient(dxgi.h_wnd, &cursor)) { return; }
+        *point = cursor;
+        valid = true;
+    });
+    return valid;
+}
+
 void gfx_dxgi_shutdown(void) {
 }
 
