@@ -1255,7 +1255,7 @@ static bool network_api_curl_ws_send_close(CURL* curl, curl_socket_t socket) {
     CURLcode result;
     int waited = 0;
     do {
-        result = curl_ws_send(curl, closeStatus, sizeof(closeStatus), &sent, 0, CURLWS_CLOSE);
+        result = sNetworkApiCurlWebSocketSend(curl, closeStatus, sizeof(closeStatus), &sent, 0, CURLWS_CLOSE);
         if (result == CURLE_AGAIN) {
             network_api_curl_wait(socket, POLLIN, 100);
             waited += 100;
