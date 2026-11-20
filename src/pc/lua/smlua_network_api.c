@@ -17,6 +17,7 @@
 
 #include "smlua.h"
 #include "pc/mods/mods.h"
+#include "pc/fs/fs.h"
 
 #include <pthread.h>
 #ifndef _WIN32
@@ -32,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <wchar.h>
 #ifndef _WIN32
 #include <curl/curl.h>
@@ -1636,6 +1638,13 @@ static int network_api_websocket_connect(lua_State* L) {
         lua_pushstring(L, "Only valid wss:// URLs up to 2048 bytes are accepted");
         return 2;
     }
+    if (network_api_domain_is_blocked(url)) {
+        network_api_log_access(owner->relativePath, url, "BLOCKED");
+        lua_pushnil(L);
+        lua_pushstring(L, "This domain is blocked by the SM64CoopDX web blacklist");
+        return 2;
+    }
+    network_api_log_access(owner->relativePath, url, "REQUESTED");
     if (!network_api_load_websocket_functions()) {
         lua_pushnil(L);
 #ifdef _WIN32
@@ -1903,6 +1912,99 @@ static int network_api_cancel_request(lua_State* L) {
     return 1;
 }
 
+
+#define NETWORK_API_BLACKLIST_FILE "network_blacklist.txt"
+#define NETWORK_API_HISTORY_FILE "network_access_history.txt"
+
+static pthread_mutex_t sNetworkApiLogMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static bool network_api_get_host(const char* url, char* host, size_t hostSize) {
+    const char* start = strstr(url, "://");
+    if (start == NULL) return false;
+    start += 3;
+    size_t length = strcspn(start, "/?#:");
+    if (length == 0 || length >= hostSize) return false;
+    for (size_t i = 0; i < length; ++i) {
+        unsigned char ch = (unsigned char)start[i];
+        if (!(isalnum(ch) || ch == '.' || ch == '-')) return false;
+        host[i] = (char)tolower(ch);
+    }
+    host[length] = '\0';
+    return true;
+}
+
+static void network_api_ensure_settings_files(void) {
+    const char* blacklistPath = fs_get_write_path(NETWORK_API_BLACKLIST_FILE);
+    const char* historyPath = fs_get_write_path(NETWORK_API_HISTORY_FILE);
+    if (blacklistPath != NULL) {
+        FILE* file = fopen(blacklistPath, "ab");
+        if (file != NULL) {
+            if (ftell(file) == 0) {
+                fputs("# One domain per line. Subdomains are blocked too.\n# Example: example.com\n", file);
+            }
+            fclose(file);
+        }
+    }
+    if (historyPath != NULL) {
+        FILE* file = fopen(historyPath, "ab");
+        if (file != NULL) fclose(file);
+    }
+}
+
+static void network_api_log_access(const char* ownerPath, const char* url, const char* result) {
+    network_api_ensure_settings_files();
+    const char* path = fs_get_write_path(NETWORK_API_HISTORY_FILE);
+    if (path == NULL) return;
+    time_t now = time(NULL);
+    struct tm* local = localtime(&now);
+    char timestamp[32] = "unknown-time";
+    if (local != NULL) strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", local);
+    pthread_mutex_lock(&sNetworkApiLogMutex);
+    FILE* file = fopen(path, "ab");
+    if (file != NULL) {
+        fprintf(file, "%s | %s | %s | %s\n", timestamp,
+                ownerPath != NULL ? ownerPath : "unknown mod",
+                url != NULL ? url : "unknown URL", result);
+        fclose(file);
+    }
+    pthread_mutex_unlock(&sNetworkApiLogMutex);
+}
+
+static bool network_api_domain_is_blocked(const char* url) {
+    network_api_ensure_settings_files();
+    char host[256];
+    if (!network_api_get_host(url, host, sizeof(host))) return true;
+    const char* path = fs_get_write_path(NETWORK_API_BLACKLIST_FILE);
+    if (path == NULL) return false;
+    FILE* file = fopen(path, "rb");
+    if (file == NULL) return false;
+    char line[512];
+    bool blocked = false;
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char* entry = line;
+        while (isspace((unsigned char)*entry)) ++entry;
+        size_t length = strlen(entry);
+        while (length > 0 && isspace((unsigned char)entry[length - 1])) entry[--length] = '\0';
+        if (length == 0 || entry[0] == '#') continue;
+        for (size_t i = 0; i < length; ++i) entry[i] = (char)tolower((unsigned char)entry[i]);
+        while (length > 0 && entry[length - 1] == '.') entry[--length] = '\0';
+        if (length == 0) continue;
+        size_t hostLength = strlen(host);
+        if ((hostLength == length && strcmp(host, entry) == 0) ||
+            (hostLength > length && host[hostLength - length - 1] == '.' &&
+             strcmp(host + hostLength - length, entry) == 0)) {
+            blocked = true;
+            break;
+        }
+    }
+    fclose(file);
+    return blocked;
+}
+
+void smlua_network_api_settings_init(void) {
+    network_api_ensure_settings_files();
+}
+
 static int network_api_https_request(lua_State* L) {
     if (lua_gettop(L) != 2 || lua_type(L, 1) != LUA_TTABLE || lua_type(L, 2) != LUA_TFUNCTION) {
         lua_pushnil(L);
@@ -1951,6 +2053,15 @@ static int network_api_https_request(lua_State* L) {
         lua_pushstring(L, "Only valid https:// URLs up to 2048 bytes are accepted");
         return 2;
     }
+
+    if (network_api_domain_is_blocked(url)) {
+        network_api_log_access(owner->relativePath, url, "BLOCKED");
+        lua_pop(L, 1);
+        lua_pushnil(L);
+        lua_pushstring(L, "This domain is blocked by the SM64CoopDX web blacklist");
+        return 2;
+    }
+    network_api_log_access(owner->relativePath, url, "REQUESTED");
 
     struct NetworkHttpRequest* request = calloc(1, sizeof(struct NetworkHttpRequest));
     if (request == NULL) {
