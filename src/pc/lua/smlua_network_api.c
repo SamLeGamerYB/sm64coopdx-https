@@ -520,10 +520,10 @@ static size_t network_api_curl_write_headers(char* data, size_t size, size_t cou
 static int network_api_curl_progress(void* context, curl_off_t downloadTotal,
                                      curl_off_t downloadNow, curl_off_t uploadTotal,
                                      curl_off_t uploadNow) {
-    UNUSED downloadTotal;
-    UNUSED downloadNow;
-    UNUSED uploadTotal;
-    UNUSED uploadNow;
+    (void)downloadTotal;
+    (void)downloadNow;
+    (void)uploadTotal;
+    (void)uploadNow;
     return network_api_request_is_cancelled(context) ? 1 : 0;
 }
 
@@ -1352,10 +1352,10 @@ static void network_api_ws_fail(struct NetworkWebSocket* ws, const char* message
 static int network_api_curl_ws_progress(void* context, curl_off_t downloadTotal,
                                         curl_off_t downloadNow, curl_off_t uploadTotal,
                                         curl_off_t uploadNow) {
-    UNUSED downloadTotal;
-    UNUSED downloadNow;
-    UNUSED uploadTotal;
-    UNUSED uploadNow;
+    (void)downloadTotal;
+    (void)downloadNow;
+    (void)uploadTotal;
+    (void)uploadNow;
     return network_api_ws_is_closing(context) ? 1 : 0;
 }
 
@@ -1579,7 +1579,7 @@ cleanup:
 }
 #else
 static void* network_api_ws_worker(void* argument) {
-    UNUSED argument;
+    (void)argument;
     return NULL;
 }
 #endif
