@@ -1229,7 +1229,7 @@ static bool network_api_curl_ws_send_message(CURL* curl, curl_socket_t socket,
             CURLcode result = sNetworkApiCurlWebSocketSend(curl, data + frameOffset, frameLength - frameOffset,
                                            &sent, 0, flags);
             if (result == CURLE_AGAIN) {
-                if (!network_api_curl_wait(socket, POLLOUT, 1000)) { continue; }
+                if (!network_api_curl_wait(socket, POLLIN, 1000)) { continue; }
                 continue;
             }
             if (result != CURLE_OK) { return false; }
@@ -1252,7 +1252,7 @@ static bool network_api_curl_ws_send_close(CURL* curl, curl_socket_t socket) {
     do {
         result = curl_ws_send(curl, closeStatus, sizeof(closeStatus), &sent, 0, CURLWS_CLOSE);
         if (result == CURLE_AGAIN) {
-            network_api_curl_wait(socket, POLLOUT, 100);
+            network_api_curl_wait(socket, POLLIN, 100);
             waited += 100;
         }
     } while (result == CURLE_AGAIN && waited < 5000);
@@ -1382,6 +1382,9 @@ static void* network_api_ws_worker(void* argument) {
             if (metadata->flags & CURLWS_CLOSE) {
                 remoteClosed = true;
                 break;
+            }
+            if (metadata->flags & (CURLWS_PING | CURLWS_PONG)) {
+                continue;
             }
             if (messageLength == 0) {
                 messageBinary = (metadata->flags & CURLWS_BINARY) != 0;
