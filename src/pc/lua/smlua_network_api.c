@@ -700,10 +700,25 @@ static void network_api_ws_queue_event(struct NetworkWebSocket* ws,
                                        const char* payload, size_t payloadLength,
                                        bool binary) {
     struct NetworkWebSocketEvent* event = calloc(1, sizeof(*event));
-    if (event == NULL) { return; }
+    if (event == NULL) {
+        pthread_mutex_lock(&sNetworkApiMutex);
+        ws->closeRequested = true;
+        ws->transportFailed = true;
+        pthread_cond_broadcast(&ws->condition);
+        pthread_mutex_unlock(&sNetworkApiMutex);
+        return;
+    }
     if (payloadLength > 0) {
         event->payload = malloc(payloadLength);
-        if (event->payload == NULL) { free(event); return; }
+        if (event->payload == NULL) {
+            free(event);
+            pthread_mutex_lock(&sNetworkApiMutex);
+            ws->closeRequested = true;
+            ws->transportFailed = true;
+            pthread_cond_broadcast(&ws->condition);
+            pthread_mutex_unlock(&sNetworkApiMutex);
+            return;
+        }
         memcpy(event->payload, payload, payloadLength);
     }
     event->payloadLength = payloadLength;
