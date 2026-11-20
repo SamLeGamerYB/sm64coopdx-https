@@ -53,6 +53,9 @@
 #define NETWORK_WS_MAX_MESSAGE (1024 * 1024)
 #define NETWORK_WS_MAX_CONNECTIONS 4
 
+static bool network_api_domain_is_blocked(const char* url);
+static void network_api_log_access(const char* ownerPath, const char* url, const char* result);
+
 struct NetworkHttpRequest {
     pthread_t thread;
     bool threadStarted;
