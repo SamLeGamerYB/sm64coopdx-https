@@ -1535,9 +1535,17 @@ static void* network_api_ws_worker(void* argument) {
             size_t received = 0;
             const struct curl_ws_frame* metadata = NULL;
             result = sNetworkApiCurlWebSocketReceive(curl, receiveBuffer, sizeof(receiveBuffer), &received, &metadata);
-            if (result == CURLE_OK && metadata != NULL && (metadata->flags & CURLWS_CLOSE)) {
-                remoteClosed = true;
-                break;
+            if (result == CURLE_OK && metadata != NULL) {
+                if (metadata->flags & CURLWS_CLOSE) {
+                    remoteClosed = true;
+                    break;
+                }
+                if ((metadata->flags & CURLWS_PING) &&
+                    (received > 125 ||
+                     !network_api_curl_ws_send_pong(ws, curl, socket, receiveBuffer, received))) {
+                    network_api_ws_fail(ws, "WebSocket ping response failed during close");
+                    break;
+                }
             }
             if (result != CURLE_AGAIN && result != CURLE_OK) { break; }
             waited += 100;
