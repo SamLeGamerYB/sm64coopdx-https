@@ -19,6 +19,9 @@
 #include "pc/mods/mods.h"
 
 #include <pthread.h>
+#ifndef _WIN32
+#include <poll.h>
+#endif
 #include <ctype.h>
 #include <limits.h>
 #include <stdint.h>
@@ -126,9 +129,12 @@ static unsigned int sNetworkApiNextId = 1;
 static unsigned int sNetworkApiRequestCount = 0;
 #ifdef _WIN32
 static struct NetworkWebSocket* sNetworkWebSockets = NULL;
-static unsigned int sNetworkWebSocketCount = 0;
-static unsigned int sNetworkWebSocketNextId = 1;
+static unsigned int sNetworkApiWebSocketCount = 0;
+static unsigned int sNetworkApiWebSocketNextId = 1;
 #else
+static struct NetworkWebSocket* sNetworkWebSockets = NULL;
+static unsigned int sNetworkApiWebSocketCount = 0;
+static unsigned int sNetworkApiWebSocketNextId = 1;
 static pthread_once_t sNetworkApiCurlInitOnce = PTHREAD_ONCE_INIT;
 static bool sNetworkApiCurlAvailable = false;
 static void network_api_curl_global_init(void) {
