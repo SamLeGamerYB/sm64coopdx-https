@@ -11,7 +11,7 @@ The Lua API and permission model stay the same on every platform. Native transpo
 ## Current status
 
 - **Windows:** HTTPS and WSS use WinHTTP.
-- **Linux/SteamOS and macOS:** HTTPS and WSS use libcurl. The WebSocket API requires libcurl 7.86.0 or newer and a build that enables its WebSocket protocol.
+- **Linux/SteamOS and macOS:** HTTPS and WSS use libcurl. CI is configured to build and statically link libcurl 8.23.0 with WebSocket support enabled; local builds depend on the system libcurl's available protocols and symbols.
 - **Verification:** the new Unix transports have not yet passed CI or runtime tests; do not treat them as verified.
 - **Permissions:** opt-in per local mod, disabled by default.
 
@@ -112,8 +112,9 @@ end
 - `on_message(id, payload, isBinary)` receives a Lua string and a boolean distinguishing text from binary frames.
 - `on_error(id, message)` reports transport errors.
 - `on_close(id)` runs when an established connection ends.
+- The libcurl backend automatically answers WebSocket PING control frames with matching PONG frames.
 - The optional third argument is a headers table for explicit handshake headers (for example, `Authorization`). Header names and values are validated and the total is limited to 16 KiB.
-- WinHTTP is configured with a 15-second WebSocket keep-alive interval, a 60-second receive timeout, and a 5-second close-handshake timeout. The libcurl backend uses TCP keep-alive and a bounded close wait. Both backends still require runtime timing verification.
+- WinHTTP is configured with a 15-second WebSocket keep-alive interval, a 60-second receive timeout, and a 5-second close-handshake timeout. The libcurl backend uses TCP keep-alive, answers PING frames, bounds send waits, and uses a bounded close wait. Both backends still require runtime timing verification.
 - `websocket_send` and `websocket_close` return booleans. A send returning true means it was queued, not necessarily delivered.
 - A mod may only send to or close socket IDs it created itself.
 
