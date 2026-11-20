@@ -715,13 +715,14 @@ endif
 
 BACKEND_LDFLAGS :=
 
-# libcurl is the shared HTTPS/WebSocket transport for Unix-like platforms.
-# Homebrew's curl is keg-only on macOS, so use its explicit prefix.
+# libcurl is the shared HTTPS/WebSocket transport on Unix-like platforms.
+# Use Homebrew's headers on macOS, but keep linking to the system libcurl that
+# the existing macOS game build already depends on (do not require Homebrew at runtime).
 ifeq ($(WINDOWS_BUILD),0)
   ifeq ($(HOST_OS),Darwin)
     CURL_PREFIX := $(shell brew --prefix curl)
     BACKEND_CFLAGS += -I$(CURL_PREFIX)/include
-    BACKEND_LDFLAGS += -L$(CURL_PREFIX)/lib -lcurl
+    BACKEND_LDFLAGS += -lcurl
   else
     BACKEND_CFLAGS += $(shell pkg-config --cflags libcurl)
     BACKEND_LDFLAGS += $(shell pkg-config --libs libcurl)
