@@ -11,7 +11,17 @@ SOURCE_DIR="$WORK_DIR/curl-$CURL_VERSION"
 
 mkdir -p "$WORK_DIR" "$CURL_PREFIX"
 curl --fail --location --retry 3 "https://curl.se/download/curl-$CURL_VERSION.tar.xz" --output "$ARCHIVE"
-tar -xJf "$ARCHIVE" -C "$WORK_DIR"
+EXPECTED_SHA256="95b22eb32bf6d1fa6e3e9463bdb61cece3efc56d86576a9b3cbd428246a6d854"
+if command -v shasum >/dev/null 2>&1; then
+  ACTUAL_SHA256="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
+else
+  ACTUAL_SHA256="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+fi
+if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+  echo "libcurl source checksum mismatch" >&2
+  exit 1
+fi
+tar -xf "$ARCHIVE" -C "$WORK_DIR"
 
 export CPPFLAGS="-I$OPENSSL_PREFIX/include ${CPPFLAGS:-}"
 export LDFLAGS="-L$OPENSSL_PREFIX/lib ${LDFLAGS:-}"
@@ -48,6 +58,10 @@ make install
 
 if ! "$CURL_PREFIX/bin/curl-config" --protocols | tr ' ' '\n' | grep -qx 'WSS'; then
   echo "The built libcurl does not advertise WSS support" >&2
+  exit 1
+fi
+if ! "$CURL_PREFIX/bin/curl-config" --features | grep -qx 'SSL'; then
+  echo "The built libcurl does not include TLS support" >&2
   exit 1
 fi
 
