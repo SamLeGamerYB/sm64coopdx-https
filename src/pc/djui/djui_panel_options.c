@@ -5,6 +5,7 @@
 #include "djui_panel_controls.h"
 #include "djui_panel_display.h"
 #include "djui_panel_sound.h"
+#include "djui_panel_web_settings.h"
 #include "djui_panel_misc.h"
 #include "djui_panel_menu.h"
 #include "djui_panel_dynos.h"
@@ -32,6 +33,7 @@ void djui_panel_options_create(struct DjuiBase* caller) {
         djui_button_create(body, DLANG(OPTIONS, CONTROLS), DJUI_BUTTON_STYLE_NORMAL, djui_panel_controls_create);
         djui_button_create(body, DLANG(OPTIONS, DISPLAY), DJUI_BUTTON_STYLE_NORMAL, djui_panel_display_create);
         djui_button_create(body, DLANG(OPTIONS, SOUND), DJUI_BUTTON_STYLE_NORMAL, djui_panel_sound_create);
+        djui_button_create(body, "Web Settings", DJUI_BUTTON_STYLE_NORMAL, djui_panel_web_settings_create);
         djui_button_create(body, DLANG(OPTIONS, MISC), DJUI_BUTTON_STYLE_NORMAL, djui_panel_misc_create);
         djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_options_back);
     }
