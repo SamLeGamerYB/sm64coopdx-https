@@ -29,6 +29,24 @@ local wssSupported = network.websocket_is_supported()
 - `network.is_supported()` returns whether this build has a working HTTPS transport.
 - `network.websocket_is_supported()` checks WinHTTP WebSocket entry points on Windows. On Linux/macOS it checks that the runtime libcurl advertises `wss` and exposes the WebSocket send/receive API.
 
+## Opening a link in the default browser
+
+A mod can ask the operating system to open an HTTP(S) link in the user's default browser:
+
+```lua
+local opened, err = network.open_url("https://example.com")
+if not opened then
+    print("Could not open link:", err)
+end
+```
+
+- The calling mod must have network permission.
+- Only `http://` and `https://` URLs are accepted; local files and executable/custom schemes are rejected.
+- The global Web Settings domain blacklist is applied to browser links too.
+- The function opens the link immediately when called and returns `true` on success, or `nil, errorMessage` if it cannot be opened.
+- Access is recorded in the local web access history as `OPENED`, `BLOCKED`, or `ERROR`.
+
+
 ## HTTPS requests
 
 ```lua
