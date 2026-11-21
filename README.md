@@ -4,7 +4,7 @@ A fork of [Super Mario 64 Coop Deluxe](https://github.com/coop-deluxe/sm64coopdx
 
 The goal is to let modders add online features to their mods without having to implement their own native networking code. Examples include Twitch integrations, external APIs, webhooks, online leaderboards, and other services.
 
-> **For mod developers:** Start with the [Quick start](#quick-start-for-mod-developers) below. The full API reference is available in [docs/NETWORK_API.md](docs/NETWORK_API.md).
+> **For mod developers:** Start with the [Quick start](#quick-start-for-mod-developers) below. The full API reference is available in [docs/NETWORK_API.md](https://github.com/SamLeGamerYB/sm64coopdx-https/tree/feature/websocket-api/docs/NETWORK_API.md).
 
 ## Quick start for mod developers
 
