@@ -130,7 +130,27 @@ The socket ID is returned before the connection is ready. Send messages from `on
 
 To send binary data, use `network.websocket_send(socketId, payload, "binary")`. To close a connection, call `network.websocket_close(socketId)`.
 
-### 4. Cancel a request or close a connection
+### 4. Open a link in the user's default browser
+
+Use `network.open_url(url)` to ask the operating system to open an HTTP or HTTPS link in the user's default web browser.
+
+```lua
+local opened, err = network.open_url("https://example.com")
+
+if not opened then
+    print("Could not open link: " .. tostring(err))
+end
+```
+
+This function:
+- Requires the user to have enabled network access for your mod.
+- Accepts only `http://` and `https://` URLs.
+- Checks the global Web Settings blacklist before opening the link.
+- Records the attempt in the network access history.
+
+It opens the user's browser; it does **not** make an HTTP request or return the web page's contents.
+
+### 5. Cancel a request or close a connection
 
 ```lua
 -- Cancel an HTTP request started by this mod:
@@ -154,8 +174,9 @@ A mod can only cancel its own HTTP requests and send to or close WebSocket conne
 | `network.websocket_connect(url, callbacks, headers)` | Starts an asynchronous secure WebSocket connection. |
 | `network.websocket_send(id, payload, kind)` | Queues a text or binary WebSocket message. |
 | `network.websocket_close(id)` | Closes one of this mod's WebSocket connections. |
+| `network.open_url(url)` | Opens an HTTP(S) link in the user's default browser, subject to permission and the global blacklist. |
 
-See **[docs/NETWORK_API.md](docs/NETWORK_API.md)** for complete function details, callback parameters, limits, threading behavior, and platform notes.
+See **[docs/NETWORK_API.md](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/websocket-api/docs/NETWORK_API.md)** for complete function details, callback parameters, limits, threading behavior, and platform notes.
 
 ## Security and permissions
 
@@ -210,8 +231,8 @@ The CI workflow currently builds Windows, Linux, SteamOS, and macOS Intel target
 
 ## Documentation
 
-- **[Native Lua Network API](docs/NETWORK_API.md)** – API usage, callbacks, limits, permissions, and platform behavior.
-- **[Network API implementation notes](docs/NETWORK_API_IMPLEMENTATION.md)** – internal architecture and implementation details.
+- **[Native Lua Network API](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/websocket-api/docs/NETWORK_API.md)** – API usage, callbacks, limits, permissions, and platform behavior.
+- **[Network API implementation notes](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/websocket-api/docs/NETWORK_API_IMPLEMENTATION.md)** – internal architecture and implementation details.
 
 ## Building
 
