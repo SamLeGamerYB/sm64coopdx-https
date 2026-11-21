@@ -4,7 +4,7 @@ A fork of [Super Mario 64 Coop Deluxe](https://github.com/coop-deluxe/sm64coopdx
 
 The goal is to let modders add online features to their mods without having to implement their own native networking code. Examples include Twitch integrations, external APIs, webhooks, online leaderboards, and other services.
 
-> **For mod developers:** Start with the [Quick start](#quick-start-for-mod-developers) below. The full API reference is available in [docs/NETWORK_API.md](docs/NETWORK_API.md).
+> **For mod developers:** Start with the [Quick start](#quick-start-for-mod-developers) below. The full API reference is available in [docs/NETWORK_API.md](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/websocket-api/docs/NETWORK_API.md).
 
 ## Quick start for mod developers
 
@@ -176,7 +176,7 @@ A mod can only cancel its own HTTP requests and send to or close WebSocket conne
 | `network.websocket_close(id)` | Closes one of this mod's WebSocket connections. |
 | `network.open_url(url)` | Opens an HTTP(S) link in the user's default browser, subject to permission and the global blacklist. |
 
-See **[docs/NETWORK_API.md](docs/NETWORK_API.md)** for complete function details, callback parameters, limits, threading behavior, and platform notes.
+See **[docs/NETWORK_API.md](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/websocket-api/docs/NETWORK_API.md)** for complete function details, callback parameters, limits, threading behavior, and platform notes.
 
 ## Security and permissions
 
@@ -231,8 +231,8 @@ The CI workflow currently builds Windows, Linux, SteamOS, and macOS Intel target
 
 ## Documentation
 
-- **[Native Lua Network API](docs/NETWORK_API.md)** – API usage, callbacks, limits, permissions, and platform behavior.
-- **[Network API implementation notes](docs/NETWORK_API_IMPLEMENTATION.md)** – internal architecture and implementation details.
+- **[Native Lua Network API](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/websocket-api/docs/NETWORK_API.md)** – API usage, callbacks, limits, permissions, and platform behavior.
+- **[Network API implementation notes](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/websocket-api/docs/NETWORK_API_IMPLEMENTATION.md)** – internal architecture and implementation details.
 
 ## Building
 
