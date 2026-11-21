@@ -1,3 +1,5 @@
+The readme has been made by AI, I don't know how to explain my code
+
 # SM64CoopDX – HTTPS & WebSocket API
 
 A fork of [Super Mario 64 Coop Deluxe](https://github.com/coop-deluxe/sm64coopdx) that gives Lua mods a permission-based way to communicate with online services.
