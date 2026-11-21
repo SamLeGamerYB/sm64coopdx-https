@@ -19,6 +19,8 @@
 #include "pc/mods/mods.h"
 #include "pc/fs/fs.h"
 
+#include <SDL2/SDL.h>
+
 #include <pthread.h>
 #ifndef _WIN32
 #include <poll.h>
@@ -169,6 +171,20 @@ static bool network_api_has_https_prefix(const char* url) {
         if (tolower((unsigned char)url[i]) != prefix[i]) { return false; }
     }
     return true;
+}
+
+static bool network_api_has_http_or_https_prefix(const char* url) {
+    static const char* prefixes[] = { "http://", "https://" };
+    for (size_t p = 0; p < sizeof(prefixes) / sizeof(prefixes[0]); p++) {
+        size_t length = strlen(prefixes[p]);
+        if (strlen(url) < length) { continue; }
+        size_t i = 0;
+        for (; i < length; i++) {
+            if (tolower((unsigned char)url[i]) != prefixes[p][i]) { break; }
+        }
+        if (i == length) { return true; }
+    }
+    return false;
 }
 
 static bool network_api_valid_token(const char* value) {
@@ -2006,6 +2022,49 @@ void smlua_network_api_settings_init(void) {
     network_api_ensure_settings_files();
 }
 
+static int network_api_open_url(lua_State* L) {
+    if (lua_gettop(L) != 1 || lua_type(L, 1) != LUA_TSTRING) {
+        lua_pushnil(L);
+        lua_pushstring(L, "open_url expects a URL string");
+        return 2;
+    }
+
+    struct Mod* owner = gLuaActiveMod;
+    if (owner == NULL || !owner->networkAccessAllowed) {
+        lua_pushnil(L);
+        lua_pushstring(L, "This mod has not been granted network access");
+        return 2;
+    }
+
+    size_t urlLength = 0;
+    const char* url = lua_tolstring(L, 1, &urlLength);
+    if (urlLength == 0 || urlLength > NETWORK_API_MAX_URL ||
+        memchr(url, '\0', urlLength) != NULL || !network_api_valid_url_text(url) ||
+        !network_api_has_http_or_https_prefix(url)) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Only valid http:// and https:// URLs up to 2048 bytes are accepted");
+        return 2;
+    }
+
+    if (network_api_domain_is_blocked(url)) {
+        network_api_log_access(owner->relativePath, url, "BLOCKED");
+        lua_pushnil(L);
+        lua_pushstring(L, "This domain is blocked by the SM64CoopDX web blacklist");
+        return 2;
+    }
+
+    if (SDL_OpenURL(url) != 0) {
+        network_api_log_access(owner->relativePath, url, "ERROR");
+        lua_pushnil(L);
+        lua_pushstring(L, SDL_GetError());
+        return 2;
+    }
+
+    network_api_log_access(owner->relativePath, url, "OPENED");
+    lua_pushboolean(L, true);
+    return 1;
+}
+
 static int network_api_https_request(lua_State* L) {
     if (lua_gettop(L) != 2 || lua_type(L, 1) != LUA_TTABLE || lua_type(L, 2) != LUA_TFUNCTION) {
         lua_pushnil(L);
@@ -2249,6 +2308,8 @@ void smlua_network_api_bind(lua_State* L) {
     lua_setfield(L, -2, "websocket_is_supported");
     lua_pushcfunction(L, network_api_cancel_request);
     lua_setfield(L, -2, "cancel_request");
+    lua_pushcfunction(L, network_api_open_url);
+    lua_setfield(L, -2, "open_url");
     lua_pushcfunction(L, network_api_https_request);
     lua_setfield(L, -2, "https_request");
     lua_pushcfunction(L, network_api_websocket_connect);
