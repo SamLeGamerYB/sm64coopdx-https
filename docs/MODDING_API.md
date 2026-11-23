@@ -105,11 +105,11 @@ Changing only `m.vel.y` is insufficient for arbitrary 3D gravity. The movement a
 
 A vertical-strength-only implementation may be used as an internal development step, but it must not be presented as full vector gravity.
 
-## Planned module documentation
+## Module documentation
 
-Each module will eventually have a dedicated guide and runnable Lua examples under `docs/lua/examples/`. The shared reference will link to those guides as they are implemented:
+Each module will have a dedicated guide and runnable Lua examples under `docs/lua/examples/`.
 
-- [Gravity API](lua/GRAVITY_API.md) — planned
-- [Liquid API](lua/LIQUID_API.md) — planned
-- [Screen FX API](lua/SCREEN_FX_API.md) — planned
-- [Video API](lua/VIDEO_API.md) — planned
+- [Gravity API](lua/GRAVITY_API.md) — initial design specification; native implementation pending.
+- Liquid API — planned.
+- Screen FX API — planned.
+- Video API — planned.
