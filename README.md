@@ -232,6 +232,7 @@ The CI workflow currently builds Windows, Linux, SteamOS, and macOS Intel target
 ## Documentation
 
 - **[Native Lua Network API](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/websocket-api/docs/NETWORK_API.md)** – API usage, callbacks, limits, permissions, and platform behavior.
+- **[Modding API architecture](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/modding-api/docs/MODDING_API.md)** – planned shared Lua namespace, module rules, multiplayer synchronization policy, and Gravity API roadmap.
 - **[Network API implementation notes](https://github.com/SamLeGamerYB/sm64coopdx-https/blob/feature/websocket-api/docs/NETWORK_API_IMPLEMENTATION.md)** – internal architecture and implementation details.
 
 ## Building
