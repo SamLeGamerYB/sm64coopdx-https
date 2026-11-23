@@ -143,7 +143,6 @@ static unsigned int sNetworkApiRequestCount = 0;
 static struct NetworkWebSocket* sNetworkWebSockets = NULL;
 static unsigned int sNetworkApiWebSocketCount = 0;
 static unsigned int sNetworkApiWebSocketNextId = 1;
-static unsigned int sNetworkApiWebSocketDispatchAfterId = 0;
 #else
 static struct NetworkWebSocket* sNetworkWebSockets = NULL;
 static unsigned int sNetworkApiWebSocketCount = 0;
@@ -164,6 +163,7 @@ static bool network_api_curl_has_protocol(const char* name) {
     return false;
 }
 #endif
+static unsigned int sNetworkApiWebSocketDispatchAfterId = 0;
 
 static bool network_api_has_https_prefix(const char* url) {
     static const char prefix[] = "https://";
@@ -2535,4 +2535,5 @@ void smlua_network_api_shutdown(lua_State* L) {
     }
     sNetworkApiWebSocketCount = 0;
     sNetworkApiRequestCount = 0;
+    sNetworkApiWebSocketDispatchAfterId = 0;
 }
