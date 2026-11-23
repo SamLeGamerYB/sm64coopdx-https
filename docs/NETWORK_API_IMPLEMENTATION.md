@@ -13,7 +13,7 @@ This file records repository-specific integration constraints and the current im
 
 ## Platform and build constraints
 
-- The repository's CI workflow builds Windows, Linux, SteamOS, macOS ARM and macOS Intel. Its push and pull-request triggers target `main`, `dev` and `feature/websocket-api`; feature work can be validated before merging, and future main-branch changes also run the platform matrix. Push-triggered jobs are intentionally filtered to commit messages containing `[build]`; manual workflow dispatch and eligible pull requests are not subject to that filter.
+- The repository's CI workflow builds Windows, Linux, SteamOS, macOS ARM and macOS Intel. Its push and pull-request triggers target `main`, `dev` and `feature/websocket-api`; feature work can be validated before merging, and future main-branch changes also run the platform matrix. Push-triggered jobs run when the commit message contains `[build]` or `[fix]`; manual workflow dispatch and eligible pull requests are not subject to that filter.
 - `scripts/build-libcurl.sh` builds a checksum-pinned static libcurl 8.23.0 with `--enable-websockets`, verifies the `WSS` protocol, TLS feature, static archive, and exported WebSocket symbols, and exposes the static archive and OpenSSL paths to the following build step. The Linux/SteamOS and both macOS CI jobs are configured to statically link this backend, avoiding new runtime libcurl/OpenSSL dependencies; this workflow configuration has not yet been verified by a run. Local Unix builds may use the system libcurl and must report WSS unavailable when its WebSocket support is absent.
 - Windows CI uses MSYS2 MinGW (both 32-bit and 64-bit toolchains). WinHTTP is a Windows system library, but it must be explicitly linked with `-lwinhttp` if used.
 - Windows links WinINet, Winsock, and WinHTTP for the current HTTPS implementation.
@@ -27,16 +27,16 @@ This file records repository-specific integration constraints and the current im
 - Lua surface: `network.has_permission()`, `network.is_supported()`, `network.websocket_is_supported()`, `network.https_request(options, callback)`, owner-only `network.cancel_request(requestId)`, and `network.websocket_connect(url, callbacks, headers)`, `network.websocket_send(id, payload, kind)`, `network.websocket_close(id)`.
 - The HTTPS request accepts a caller-selected method, headers, and optional body. The callback receives `statusCode, rawResponseHeaders, responseBody, errorMessage`.
 - At most 8 completed HTTPS callbacks are dispatched per game update, matching the maximum number of concurrent requests.
-- At most 32 queued WebSocket events are dispatched per game update; each socket also has bounded incoming and outgoing queues.
+- At most 32 queued WebSocket events are dispatched per game update; selection uses a rotating last-dispatched socket ID and wraps around the active socket list, so a busy earlier socket cannot monopolize every dispatch pass. Each socket also has bounded incoming and outgoing queues.
 - Workers never call Lua. Completed requests are checked and dispatched from `smlua_update()` through `smlua_call_hook()`.
 - The owner mod is identified by a copied `relativePath`; callback dispatch re-checks that the owner remains active and still has permission.
 - When a mod file is hot-reloaded, the user revokes its network permission, the active mod set is replaced, or the local mod cache is refreshed, its pending HTTP requests are marked cancelled, its WebSockets are asked to close, and callbacks are discarded before old mod objects are freed. The worker checks the flag between synchronous WinHTTP operations; it never closes a handle while another thread is using it.
 - HTTPS is restricted to `https://`; WinHTTP redirects, automatic cookies, and ambient authentication are disabled. Request/response bodies are capped at 1 MiB, request headers at 16 KiB, concurrent requests at 8, and response reading at 30 seconds.
 - Windows HTTPS/WSS use WinHTTP. Linux/SteamOS and macOS use the libcurl backend. CI builds a static WSS-enabled libcurl and OpenSSL; local builds without a supplied `CURL_PREFIX` use the system libcurl and can expose HTTPS while reporting WSS unavailable.
 - Both WebSocket backends bound send-side waits and stop waiting when the owner closes the connection. The libcurl backend polls for writability during sends and readability during receives; the Windows backend keeps send and receive on separate workers.
-- The Windows WSS backend dynamically loads the Windows 8+ WinHTTP WebSocket entry points. Linux/SteamOS and macOS use libcurl's optional WebSocket API (introduced in 7.86.0) with a single worker loop, bounded queues, fragmented-message assembly, automatic PONG replies to PING control frames, and main-thread callback dispatch. The upstream API remains experimental; the CI-specific static build enables it explicitly, while local builds check runtime protocol and symbol availability. Neither the new libcurl backend nor the existing Windows backend has been build/runtime-tested in this environment.
+- The Windows WSS backend dynamically loads the Windows 8+ WinHTTP WebSocket entry points. Linux/SteamOS and macOS use libcurl's optional WebSocket API (introduced in 7.86.0) with a single worker loop, bounded queues, fragmented-message assembly, automatic PONG replies to PING control frames, and main-thread callback dispatch. The upstream API remains experimental; the CI-specific static build enables it explicitly, while local builds check runtime protocol and symbol availability. The five-target CI matrix passed on fork commit `9ac6489a657487c7073ebb9723e2f6d5891b21c9`; the round-robin dispatch fix is being rebuilt separately. Runtime HTTPS/WSS behaviour remains unverified.
 - A standalone compile/link smoke test for the libcurl WebSocket declarations, flags, and function signatures passed against the container's libcurl 8.10.1. That installed build does not advertise `wss`, so it correctly cannot provide runtime WebSockets.
-- No full SM64CoopDX build or HTTPS/WSS integration test has been executed in this environment. Do not describe this implementation as verified until the CI matrix and runtime tests pass.
+- The CI build matrix has passed for the pinned revision above, but no in-game HTTPS/WSS integration test has been executed. Do not describe the API as runtime-verified until the integration tests pass.
 
 ## Required implementation invariants
 
@@ -44,6 +44,7 @@ This file records repository-specific integration constraints and the current im
 2. Completion callbacks are dispatched only on the game thread.
 3. Every operation is associated with a stable mod identity and is discarded if that mod is no longer active.
 4. Shutdown prevents new work, marks HTTP requests cancelled, asks WebSockets to close, joins workers, clears pending events and releases callback references before Lua is closed.
+10. WebSocket callback dispatch must remain fair across active sockets; the per-frame event budget must not let one continuously busy connection starve the others.
 5. All queues, request bodies, response bodies, headers, and WebSocket messages need explicit size limits.
 6. Only `https://` and `wss://` are accepted. Redirects must not downgrade to plaintext.
 7. The API must not expose a file-writing/download primitive; payloads are delivered in memory.
