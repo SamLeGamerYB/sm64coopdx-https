@@ -2351,6 +2351,10 @@ static void network_api_ws_update(lua_State* L) {
 
         pthread_mutex_lock(&sNetworkApiMutex);
 
+        if (sNetworkWebSockets == NULL) {
+            sNetworkApiWebSocketDispatchAfterId = 0;
+        }
+
         // Resume after the last socket that produced an event or was reaped.
         // Store an ID rather than a pointer because completed sockets are freed.
         struct NetworkWebSocket** startLink = &sNetworkWebSockets;
