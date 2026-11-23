@@ -12,7 +12,7 @@ The Lua API and permission model stay the same on every platform. Native transpo
 
 - **Windows:** HTTPS and WSS use WinHTTP.
 - **Linux/SteamOS and macOS:** HTTPS and WSS use libcurl. CI is configured to build and statically link libcurl 8.23.0 with WebSocket support enabled; local builds depend on the system libcurl's available protocols and symbols.
-- **Verification:** the new Unix transports have not yet passed CI or runtime tests; do not treat them as verified.
+- **Build verification:** the five-target CI matrix passed on commit `9ac6489a657487c7073ebb9723e2f6d5891b21c9`; a rebuild including the round-robin WebSocket dispatch fix (`bc7e361`) is currently running. This is build/link evidence only; runtime tests remain pending.
 - **Permissions:** opt-in per local mod, disabled by default.
 
 ## Permission and capability checks
@@ -160,7 +160,8 @@ end
 
 ## Remaining work
 
-- Build and test Windows 32-bit/64-bit, Linux/SteamOS, and both macOS architectures.
+- Rebuild and test Windows, Linux/SteamOS, and both macOS architectures for the round-robin dispatch fix; the current CI rebuild is in progress.
+- Add a separate Windows 32-bit build/link check if 32-bit Windows remains a supported target.
 - Decide whether to keep the upstream experimental libcurl WebSocket API or replace it with a stable dedicated backend before declaring WSS production-ready.
 - Verify the minimum libcurl version and runtime availability of its WebSocket protocol on each supported Linux/macOS distribution.
-- Run HTTPS and WSS integration tests, including close, cancellation, message fragmentation, and oversized payload cases.
+- Run HTTPS and WSS integration tests, including close, cancellation, message fragmentation, multi-socket callback fairness, and oversized payload cases.
