@@ -143,6 +143,7 @@ static unsigned int sNetworkApiRequestCount = 0;
 static struct NetworkWebSocket* sNetworkWebSockets = NULL;
 static unsigned int sNetworkApiWebSocketCount = 0;
 static unsigned int sNetworkApiWebSocketNextId = 1;
+static unsigned int sNetworkApiWebSocketDispatchAfterId = 0;
 #else
 static struct NetworkWebSocket* sNetworkWebSockets = NULL;
 static unsigned int sNetworkApiWebSocketCount = 0;
@@ -2349,27 +2350,50 @@ static void network_api_ws_update(lua_State* L) {
         bool callbacksSuppressed = false;
 
         pthread_mutex_lock(&sNetworkApiMutex);
-        struct NetworkWebSocket** link = &sNetworkWebSockets;
-        while (*link != NULL) {
-            if ((*link)->eventHead != NULL) {
-                ws = *link;
-                event = ws->eventHead;
-                ws->eventHead = event->next;
-                if (ws->eventHead == NULL) { ws->eventTail = NULL; }
-                if (ws->eventCount > 0) { ws->eventCount--; }
-                if (ws->eventBytes >= event->payloadLength) { ws->eventBytes -= event->payloadLength; }
-                callbacksSuppressed = ws->callbacksSuppressed;
-                break;
+
+        // Resume after the last socket that produced an event or was reaped.
+        // Store an ID rather than a pointer because completed sockets are freed.
+        struct NetworkWebSocket** startLink = &sNetworkWebSockets;
+        if (sNetworkApiWebSocketDispatchAfterId != 0) {
+            for (struct NetworkWebSocket* cursor = sNetworkWebSockets;
+                 cursor != NULL; cursor = cursor->next) {
+                if (cursor->id == sNetworkApiWebSocketDispatchAfterId) {
+                    startLink = cursor->next != NULL ? &cursor->next : &sNetworkWebSockets;
+                    break;
+                }
             }
-            if ((*link)->complete) {
-                ws = *link;
-                *link = ws->next;
-                ws->next = NULL;
-                finished = true;
-                if (sNetworkApiWebSocketCount > 0) { sNetworkApiWebSocketCount--; }
-                break;
+        }
+        unsigned int startId = *startLink != NULL ? (*startLink)->id : 0;
+
+        // Scan from the cursor to the end, then wrap to the head. This gives
+        // every socket a turn even when an earlier socket is continuously busy.
+        for (int pass = 0; pass < 2 && ws == NULL; pass++) {
+            if (pass == 1 && startId == 0) { break; }
+            struct NetworkWebSocket** link = pass == 0 ? startLink : &sNetworkWebSockets;
+            while (*link != NULL && (pass == 0 || (*link)->id != startId)) {
+                struct NetworkWebSocket* candidate = *link;
+                if (candidate->eventHead != NULL) {
+                    ws = candidate;
+                    event = ws->eventHead;
+                    ws->eventHead = event->next;
+                    if (ws->eventHead == NULL) { ws->eventTail = NULL; }
+                    if (ws->eventCount > 0) { ws->eventCount--; }
+                    if (ws->eventBytes >= event->payloadLength) { ws->eventBytes -= event->payloadLength; }
+                    callbacksSuppressed = ws->callbacksSuppressed;
+                    sNetworkApiWebSocketDispatchAfterId = ws->id;
+                    break;
+                }
+                if (candidate->complete) {
+                    ws = candidate;
+                    *link = ws->next;
+                    ws->next = NULL;
+                    finished = true;
+                    if (sNetworkApiWebSocketCount > 0) { sNetworkApiWebSocketCount--; }
+                    sNetworkApiWebSocketDispatchAfterId = ws->id;
+                    break;
+                }
+                link = &candidate->next;
             }
-            link = &(*link)->next;
         }
         pthread_mutex_unlock(&sNetworkApiMutex);
 
