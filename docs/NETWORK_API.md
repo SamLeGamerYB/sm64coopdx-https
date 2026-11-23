@@ -12,7 +12,7 @@ The Lua API and permission model stay the same on every platform. Native transpo
 
 - **Windows:** HTTPS and WSS use WinHTTP.
 - **Linux/SteamOS and macOS:** HTTPS and WSS use libcurl. CI is configured to build and statically link libcurl 8.23.0 with WebSocket support enabled; local builds depend on the system libcurl's available protocols and symbols.
-- **Build verification:** the five-target CI matrix passed on commit `9ac6489a657487c7073ebb9723e2f6d5891b21c9`; a rebuild including the round-robin WebSocket dispatch fix (`bc7e361`) is currently running. This is build/link evidence only; runtime tests remain pending.
+- **Build verification:** the five-target CI matrix passed on commit `9ac6489a657487c7073ebb9723e2f6d5891b21c9`; the five-target rebuild including the round-robin WebSocket dispatch fix (`bc7e361`) passed in [workflow run #45163461839](https://github.com/SamLeGamerYB/sm64coopdx-https/actions/runs/45163461839). This is build/link evidence only; runtime tests remain pending.
 - **Permissions:** opt-in per local mod, disabled by default.
 
 ## Permission and capability checks
