@@ -14,7 +14,7 @@ This file records repository-specific integration constraints and the current im
 ## Platform and build constraints
 
 - The repository's CI workflow builds Windows, Linux, SteamOS, macOS ARM and macOS Intel. Its push and pull-request triggers target `main`, `dev` and `feature/websocket-api`; feature work can be validated before merging, and future main-branch changes also run the platform matrix. Push-triggered jobs run when the commit message contains `[build]` or `[fix]`; manual workflow dispatch and eligible pull requests are not subject to that filter.
-- `scripts/build-libcurl.sh` builds a checksum-pinned static libcurl 8.23.0 with `--enable-websockets`, verifies the `WSS` protocol, TLS feature, static archive, and exported WebSocket symbols, and exposes the static archive and OpenSSL paths to the following build step. The Linux/SteamOS and both macOS CI jobs are configured to statically link this backend, avoiding new runtime libcurl/OpenSSL dependencies; this workflow configuration has not yet been verified by a run. Local Unix builds may use the system libcurl and must report WSS unavailable when its WebSocket support is absent.
+- `scripts/build-libcurl.sh` builds a checksum-pinned static libcurl 8.23.0 with `--enable-websockets`, verifies the `WSS` protocol, TLS feature, static archive, and exported WebSocket symbols, and exposes the static archive and OpenSSL paths to the following build step. The Linux/SteamOS and both macOS CI jobs statically link this backend, avoiding new runtime libcurl/OpenSSL dependencies; this configuration passed the five-target matrix on commit `9ac6489a657487c7073ebb9723e2f6d5891b21c9`. The round-robin dispatch fix is being rebuilt separately. Local Unix builds may use the system libcurl and must report WSS unavailable when its WebSocket support is absent.
 - Windows CI uses MSYS2 MinGW (both 32-bit and 64-bit toolchains). WinHTTP is a Windows system library, but it must be explicitly linked with `-lwinhttp` if used.
 - Windows links WinINet, Winsock, and WinHTTP for the current HTTPS implementation.
 - New C sources in `src/pc/lua` are discovered automatically through `SRC_DIRS`.
@@ -44,12 +44,12 @@ This file records repository-specific integration constraints and the current im
 2. Completion callbacks are dispatched only on the game thread.
 3. Every operation is associated with a stable mod identity and is discarded if that mod is no longer active.
 4. Shutdown prevents new work, marks HTTP requests cancelled, asks WebSockets to close, joins workers, clears pending events and releases callback references before Lua is closed.
-10. WebSocket callback dispatch must remain fair across active sockets; the per-frame event budget must not let one continuously busy connection starve the others.
-5. All queues, request bodies, response bodies, headers, and WebSocket messages need explicit size limits.
-6. Only `https://` and `wss://` are accepted. Redirects must not downgrade to plaintext.
-7. The API must not expose a file-writing/download primitive; payloads are delivered in memory.
-8. WebSocket send/receive must distinguish text and binary payloads.
-9. A worker may own copied request data and a stable owner ID only; it must not retain pointers into Lua, mod objects, or mod-owned file buffers.
+5. WebSocket callback dispatch must remain fair across active sockets; the per-frame event budget must not let one continuously busy connection starve the others.
+6. All queues, request bodies, response bodies, headers, and WebSocket messages need explicit size limits.
+7. Only `https://` and `wss://` are accepted. Redirects must not downgrade to plaintext.
+8. The API must not expose a file-writing/download primitive; payloads are delivered in memory.
+9. WebSocket send/receive must distinguish text and binary payloads.
+10. A worker may own copied request data and a stable owner ID only; it must not retain pointers into Lua, mod objects, or mod-owned file buffers.
 
 ## Permission groundwork implemented
 
