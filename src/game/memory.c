@@ -254,12 +254,16 @@ void *growing_array_alloc(struct GrowingArray *array, u32 size) {
             array->capacity = newCapacity;
         }
 
-        // Alloc element if needed
-        void **elem = &array->buffer[array->count++];
+        // Allocate the element before advancing count. If allocation fails,
+        // leave the slot unused so a later call can retry safely.
+        void **elem = &array->buffer[array->count];
         if (!*elem) {
             *elem = array->alloc(size);
+            if (!*elem) { return NULL; }
         }
+
         memset(*elem, 0, size);
+        array->count++;
         return *elem;
     }
     return NULL;
